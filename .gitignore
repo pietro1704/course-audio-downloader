@@ -1,0 +1,50 @@
+# Local/private configuration and secrets
+config.toml
+config.*.toml
+!config.example.toml
+*.cookies.txt
+.env
+.env.*
+Secrets/
+
+# User-specific automation/inventory/output
+apple_complete_pipeline.py
+generate_ppr_all_config.py
+run_complete_courses.sh
+ppr*_inventory*.tsv
+ppr-all-courses-inventory.txt
+apple_pipeline_report.txt
+logs/
+*.log
+
+# Downloaded media / manifests
+Cursos*/
+manifest.jsonl
+*.mp3
+*.m4a
+*.aac
+*.wav
+*.ogg
+*.opus
+*.flac
+*.mp4
+*.m4v
+*.part
+*.ytdl
+*.tmp.*
+
+# Python/build artifacts
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

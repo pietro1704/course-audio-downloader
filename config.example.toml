@@ -1,0 +1,14 @@
+output_root = "~/Course Audio"
+
+[[course]]
+provider = "example-provider"
+title = "Example Course"
+# Netscape-format cookies exported from a browser profile you control.
+# Keep this file outside the repository.
+cookies_file = "~/Secrets/course-cookies/example.cookies.txt"
+# Optional same-site crawler. Keep it narrow and bounded.
+crawl = false
+max_pages = 100
+urls = [
+  "https://example.com/course/lesson-1",
+]

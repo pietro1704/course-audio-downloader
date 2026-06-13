@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync
+        run: uv sync
+      - name: Tests
+        run: uv run python -m unittest -v
+      - name: Repository hygiene check
+        run: |
+          git ls-files
+          ! git ls-files | grep -E '(^|/)(config(\..*)?\.toml|.*cookies.*|.*inventory.*|.*report.*|logs/|.*\.mp3|.*\.m4a|.*\.mp4)$'
+          ! grep -RInE '(gho_[A-Za-z0-9_]+|192\.168\.|cookies_file\s*=\s*"[^"]*(real|private|personal|prod)[^"]*")' -- . \
+            --exclude-dir=.git --exclude='.gitignore'
