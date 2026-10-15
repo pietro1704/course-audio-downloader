@@ -4,4 +4,4 @@ recursive-include docs *.md
 
 include test_ppr_extensionless.py
 
-include test_bunny.py
+include test_bunny.py test_bunny_transfer.py

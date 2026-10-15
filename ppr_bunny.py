@@ -43,9 +43,9 @@ def select_rendition(master, text):
     if audio: selected=sorted(audio)[0][1]
     elif any(v[0] for v in variants): selected=max((v for v in variants if v[0]),key=lambda v:v[1])[2]
     elif variants:
-        # Video resolution affects transfer cost, not the requested final AAC settings.
-        # Preserve the selected variant's audio stream without another source transcode.
-        selected=min(variants,key=lambda v:v[1] if v[1]>0 else float('inf'))[2]
+        # Muxed resolutions can carry different audio bitrates: preserve the
+        # highest advertised source quality, then discard video during remux.
+        selected=max(variants,key=lambda v:v[1])[2]
     elif '#EXTINF:' in text and '#EXT-X-ENDLIST' in text: selected=master
     else: raise RuntimeError('missing-player-vod-audio')
     if urlsplit(selected).scheme!='https': raise RuntimeError('unsafe-player-media-url')
@@ -67,9 +67,88 @@ def resolve_bunny(frame, lesson_url):
     selected=select_rendition(master,get_text(master,frame))
     return Candidate(selected,'hls-audio')
 
+def plain_segments(url,text):
+    import math
+    if not text.lstrip().startswith('#EXTM3U') or '#EXT-X-ENDLIST' not in text:
+        raise RuntimeError('missing-player-vod-audio')
+    # Unsupported container/encryption modes retain the existing guarded FFmpeg path.
+    if any(tag in text for tag in ('#EXT-X-MAP:', '#EXT-X-BYTERANGE:')): return None
+    if any(attributes(line.split(':',1)[1]).get('METHOD')!='NONE'
+           for line in text.splitlines() if line.startswith('#EXT-X-KEY:')): return None
+    durations=[];segments=[]
+    for line in text.splitlines():
+        line=line.strip()
+        if line.startswith('#EXTINF:'):
+            try: duration=float(line.split(':',1)[1].split(',')[0])
+            except ValueError: raise RuntimeError('invalid-player-segment-duration') from None
+            if not math.isfinite(duration) or duration<=0: raise RuntimeError('invalid-player-segment-duration')
+            durations.append(duration)
+        elif line and not line.startswith('#'):
+            segment=urljoin(url,line)
+            if urlsplit(segment).scheme!='https': raise RuntimeError('unsafe-player-media-url')
+            segments.append(segment)
+    if not segments or len(segments)!=len(durations): raise RuntimeError('invalid-player-segment-list')
+    return segments,sum(durations)
+
+def read_fragment(url,referer):
+    # Four in-flight fragments, each capped at 16 MiB; no movie spool on disk.
+    import time
+    for attempt in range(3):
+        try:
+            request=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':referer})
+            with urllib.request.urlopen(request,timeout=30) as response:
+                if response.headers.get_content_type() in {'text/html','application/json'}:
+                    raise RuntimeError('invalid-player-segment-content')
+                length=int(response.headers.get('Content-Length') or 0)
+                if length>16*1024**2: raise RuntimeError('player-segment-size-budget')
+                chunks=[];size=0;start=time.monotonic()
+                while chunk:=response.read(1024**2):
+                    size+=len(chunk)
+                    if size>16*1024**2: raise RuntimeError('player-segment-size-budget')
+                    if time.monotonic()-start>90: raise RuntimeError('player-segment-timeout')
+                    chunks.append(chunk)
+                if not size or (length and length!=size): raise OSError('incomplete-segment')
+                return b''.join(chunks)
+        except RuntimeError: raise
+        except Exception:
+            if attempt==2: raise RuntimeError('player-segment-fetch-failed') from None
+
 def copy_hls_audio(candidate,destination,max_bytes,referer):
-    # Shared source-size/duration guards and original stream-copy behavior.
-    from hotmart_cli import HotmartAdapter
-    adapter=HotmartAdapter(max_source_bytes=max_bytes)
-    adapter._meta[candidate.url]={'referer':referer}
-    return adapter.download(candidate,destination)
+    import subprocess,time
+    from concurrent.futures import ThreadPoolExecutor
+    import course_audio_bot as audio
+    parsed=plain_segments(candidate.url,get_text(candidate.url,referer))
+    if parsed is None:
+        from hotmart_cli import HotmartAdapter
+        adapter=HotmartAdapter(max_source_bytes=max_bytes)
+        adapter._meta[candidate.url]={'referer':referer}
+        return adapter.download(candidate,destination)
+    segments,expected=parsed
+    process=subprocess.Popen(['ffmpeg','-nostdin','-v','error','-y','-f','mpegts','-i','pipe:0',
+                              '-map','0:a:0','-c:a','copy','-fs',str(max_bytes),str(destination)],
+                             stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    try:
+        start=time.monotonic()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for i in range(0,len(segments),4):
+                if time.monotonic()-start>7200: raise RuntimeError('player-download-timeout')
+                # Batch submission prevents eager whole-movie buffering by executor.map.
+                futures=[pool.submit(read_fragment,url,referer) for url in segments[i:i+4]]
+                for future in futures: process.stdin.write(future.result())
+        process.stdin.close()
+        if process.wait(timeout=120): raise RuntimeError('player-remux-failed')
+        if not destination.exists() or destination.stat().st_size>=max_bytes:
+            raise RuntimeError('source-size-budget-exceeded')
+        duration=audio._probe_duration(destination)
+        tolerance=max(.25,min(2,expected*.02))
+        if duration is None or abs(duration-expected)>tolerance:
+            raise RuntimeError('player-source-duration-mismatch')
+        return destination
+    except Exception:
+        raise RuntimeError('player-audio-download-failed') from None
+    finally:
+        if process.poll() is None:
+            process.kill();process.wait()
+        if not process.stdin.closed:
+            try: process.stdin.close()
+            except OSError: pass

@@ -24,8 +24,8 @@ class BunnyTests(unittest.TestCase):
     def test_highest_audio_only_bitrate(self):
         text='#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2"\n64.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2"\n128.m3u8'
         self.assertTrue(select_rendition(MASTER,text).endswith('/128.m3u8'))
-    def test_muxed_fallback_avoids_high_resolution_transfer(self):
-        self.assertEqual(select_rendition(MASTER,MUX),'https://media.example/lesson-uuid/240p.m3u8')
+    def test_muxed_fallback_preserves_highest_source_quality(self):
+        self.assertEqual(select_rendition(MASTER,MUX),'https://media.example/lesson-uuid/720p.m3u8')
     def test_direct_vod_playlist(self):
         text='#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST'
         self.assertEqual(select_rendition(MASTER,text),MASTER)
@@ -39,7 +39,7 @@ class BunnyTests(unittest.TestCase):
         with patch('ppr_bunny.get_text',side_effect=[HTML.replace('&','&amp;'),MUX]):
             c=resolve_bunny(FRAME,'https://padrepauloricardo.org/aulas/test')
         self.assertEqual(c.kind,'hls-audio')
-        self.assertTrue(c.url.endswith('/240p.m3u8'))
+        self.assertTrue(c.url.endswith('/720p.m3u8'))
     def test_wrong_video_and_drm_are_rejected(self):
         for html in [HTML.replace('video-id="lesson-uuid"','video-id="wrong"'),HTML.replace('drm-version="0"','drm-version="1"')]:
             with patch('ppr_bunny.get_text',return_value=html):
