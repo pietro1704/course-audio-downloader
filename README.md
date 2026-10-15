@@ -7,7 +7,7 @@ It uses exported browser cookies, crawls only configured/same-site lesson links,
 ## Defaults
 
 - Default output format: **M4A/AAC** for iPhone/Apple apps.
-- Speech-friendly compression: mono, 22.05 kHz, ~24 kbps.
+- Speech-friendly compression: AAC-LC M4A, mono, 44.1 kHz, 32 kbps, without normalization. Each lesson is staged, ffprobe-checked and fully decoded before atomic promotion; originals are retained under `originals/`.
 - MP3 is opt-in only: pass `--mp3` or `--audio-format mp3`.
 
 ## Requirements

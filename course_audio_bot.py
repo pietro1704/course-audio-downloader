@@ -226,9 +226,9 @@ def ytdlp_download(url: str, out_dir: Path, stem_hint: str, cookies_file: Path |
         "--audio-format",
         output_format,
         "--audio-quality",
-        "24K",
+        "16K",
         "--postprocessor-args",
-        "ffmpeg:-vn -ac 1 -ar 22050 -b:a 24k",
+        "ffmpeg:-vn -ac 1 -ar 22050 -b:a 16k",
         "-o",
         out_tmpl,
     ]
@@ -237,9 +237,26 @@ def ytdlp_download(url: str, out_dir: Path, stem_hint: str, cookies_file: Path |
     if cookies_file:
         cmd += ["--cookies", str(cookies_file)]
     cmd.append(url)
-    rc, out = run(cmd, timeout=900)
+    rc, out = run(cmd, timeout=int(os.environ.get("COURSE_AUDIO_YTDLP_TIMEOUT", "7200")))
     ok = rc == 0 and ("ERROR:" not in out)
     return ok, out[-4000:]
+
+
+def verify_audio_output(path: Path) -> tuple[bool, str]:
+    if not path.exists() or path.stat().st_size == 0:
+        return False, "arquivo ausente/vazio"
+    rc, out = run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,profile,sample_rate,channels", "-of", "json", str(path)], timeout=300)
+    if rc != 0:
+        return False, "ffprobe falhou"
+    try:
+        stream = json.loads(out)["streams"][0]
+    except (KeyError, IndexError, json.JSONDecodeError):
+        return False, "sem stream de áudio"
+    expected = {"codec_name": "aac", "profile": "LC", "sample_rate": "44100", "channels": 1}
+    if any(str(stream.get(k)) != str(v) for k, v in expected.items()):
+        return False, f"parâmetros inválidos: {stream}"
+    rc, _ = run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "null", "-"], timeout=600)
+    return (rc == 0, "ok" if rc == 0 else "decode falhou")
 
 
 def compress_audio_file(path: Path, output_format: str = "m4a") -> tuple[Path, str]:
@@ -254,19 +271,23 @@ def compress_audio_file(path: Path, output_format: str = "m4a") -> tuple[Path, s
     codec_args = ["-c:a", "aac"] if output_format == "m4a" else []
     cmd = [
         "ffmpeg", "-y", "-i", str(path), "-vn",
-        *codec_args, "-ac", "1", "-ar", "22050", "-b:a", "24k",
+        *codec_args, "-ac", "1", "-ar", "44100", "-b:a", "32k",
         str(tmp),
     ]
-    rc, out = run(cmd, timeout=900)
+    timeout = int(os.environ.get("COURSE_AUDIO_YTDLP_TIMEOUT", "7200"))
+    rc, out = run(cmd, timeout=timeout)
     if rc != 0 or not tmp.exists() or tmp.stat().st_size == 0:
         tmp.unlink(missing_ok=True)
         return path, "compress-failed: " + out[-500:]
+    if output_format == "m4a":
+        valid, detail = verify_audio_output(tmp)
+        if not valid:
+            tmp.unlink(missing_ok=True)
+            return path, "verification-failed: " + detail
     final = path.with_suffix(final_suffix)
     original_size = path.stat().st_size
     compressed_size = tmp.stat().st_size
     if compressed_size < original_size:
-        if final != path:
-            path.unlink(missing_ok=True)
         tmp.replace(final)
         return final, f"compressed {original_size}->{compressed_size} bytes"
     tmp.unlink(missing_ok=True)
@@ -296,7 +317,11 @@ def direct_download(url: str, out_dir: Path, stem: str, cookies_file: Path | Non
     if desired.exists() and desired.stat().st_size > 0:
         return True, f"já existe: {desired}"
     filename = slugify(stem) + suffix
-    dest = out_dir / filename
+    staging = out_dir / ".staging"
+    originals = out_dir / "originals"
+    staging.mkdir(exist_ok=True)
+    originals.mkdir(exist_ok=True)
+    dest = staging / filename
     if dest.exists() and dest.stat().st_size > 0:
         final, cdetail = compress_audio_file(dest, output_format=output_format)
         return True, f"já existe convertido: {final} ({final.stat().st_size} bytes; {cdetail})"
@@ -315,8 +340,18 @@ def direct_download(url: str, out_dir: Path, stem: str, cookies_file: Path | Non
             dest.unlink(missing_ok=True)
         return False, f"falha download direto: {e}"
     if dest.exists() and dest.stat().st_size > 0:
+        shutil.copy2(dest, originals / filename)
         final, cdetail = compress_audio_file(dest, output_format=output_format)
-        return True, f"baixado: {final} ({final.stat().st_size} bytes; {cdetail})"
+        if final.suffix in {".m4a", ".mp3"} and final.exists():
+            promoted = out_dir / (slugify(stem) + final.suffix)
+            final.replace(promoted)
+            dest.unlink(missing_ok=True)
+            if promoted.suffix == ".m4a":
+                valid, detail = verify_audio_output(promoted)
+                if not valid:
+                    promoted.unlink(missing_ok=True)
+                    return False, "verification-failed: " + detail
+            return True, f"baixado: {promoted} ({promoted.stat().st_size} bytes; {cdetail})"
     return False, f"download vazio: {dest}"
 
 
@@ -341,6 +376,11 @@ def process_url(course: Course, output_root: Path, url: str, index: int, prefer_
     if prefer_ytdlp:
         ok, log = ytdlp_download(url, out_dir, stem, course.cookies_file, output_format=output_format)
         if ok:
+            outputs = sorted(out_dir.glob("*.m4a"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not outputs or not verify_audio_output(outputs[0])[0]:
+                record.update(status="error", reason="saída yt-dlp falhou verificação AAC-LC/44.1kHz/mono")
+                write_manifest(out_dir, record)
+                return record
             record.update(status="ok", method="yt-dlp", detail=log[-1000:])
             write_manifest(out_dir, record)
             return record
