@@ -1,6 +1,6 @@
 [project]
 name = "course-audio-downloader"
-version = "0.1.2"
+version = "0.1.3rc1"
 description = "Personal authenticated course audio downloader"
 requires-python = ">=3.11"
 dependencies = []
@@ -11,3 +11,7 @@ ppr-audio = "ppr_cli:main"
 package = true
 [tool.setuptools]
 py-modules = ["course_audio_bot", "pipeline", "ppr_cli"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

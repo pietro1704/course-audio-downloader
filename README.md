@@ -108,3 +108,11 @@ uv run python -m unittest -v
 ```
 
 The test suite covers URL extraction, crawler filtering, signed-media detection, output format defaults/overrides, local downloads, and repository hygiene checks for private files.
+
+## Optimized macOS PPR pipeline (release candidate)
+
+The packaged `ppr-audio` command accepts a JSON catalogue, uses authenticated local Safari, prioritizes direct audio, and overlaps at most two media tasks. It performs one complete output validation before atomic promotion and resumes only unchanged verified originals/finals.
+
+    uv run ppr-audio --catalog /path/to/catalogue.json --output-root /path/to/output --limit 2 --concurrency 2 --min-free-gib 4
+
+Read [docs/performance-plan.md](docs/performance-plan.md) for verification, rollback and known limitations. IB/Hotmart catalogue integration is not included in this PPR adapter. This candidate is not a claim that authenticated end-to-end testing has completed.
