@@ -1,16 +1,17 @@
 [project]
 name = "course-audio-downloader"
-version = "0.1.3rc1"
+version = "0.1.3rc2"
 description = "Personal authenticated course audio downloader"
 requires-python = ">=3.11"
 dependencies = []
 [project.scripts]
 course-audio-bot = "course_audio_bot:main"
 ppr-audio = "ppr_cli:main"
+hotmart-audio = "hotmart_cli:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_audio_bot", "pipeline", "ppr_cli"]
+py-modules = ["course_audio_bot", "pipeline", "ppr_cli", "hotmart_cli"]
 
 [build-system]
 requires = ["setuptools>=68"]
