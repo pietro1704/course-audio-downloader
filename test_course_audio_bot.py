@@ -106,7 +106,7 @@ class TestDownload(unittest.TestCase):
             self.assertEqual(len(files), 1)
             self.assertFalse(list((out / 'test-provider' / 'local-course').glob('*.m4a')))
 
-    def test_existing_m4a_skips_source_redownload(self):
+    def test_invalid_existing_m4a_is_not_trusted(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             out_dir = root / 'out' / 'test-provider' / 'local-course'
@@ -114,9 +114,28 @@ class TestDownload(unittest.TestCase):
             existing = out_dir / '001-aula-teste.m4a'
             existing.write_bytes(b'existing')
             ok, detail = bot.direct_download('https://files.example/lesson.wav', out_dir, '001-aula-teste', None)
-            self.assertTrue(ok)
-            self.assertIn('já existe', detail)
-            self.assertEqual(existing.read_bytes(), b'existing')
+            self.assertFalse(ok)
+            self.assertNotIn('já existe verificado', detail)
+
+
+class TestRegressionMedia(unittest.TestCase):
+    def test_video_source_is_converted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); wav = root / "source.wav"; write_wav(wav)
+            video = root / "source.mp4"
+            rc, _ = bot.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=16x16:d=1", "-i", str(wav), "-shortest", "-c:v", "mpeg4", "-c:a", "aac", str(video)])
+            self.assertEqual(rc, 0)
+            converted, detail = bot.compress_audio_file(video)
+            self.assertIsNotNone(converted, detail)
+            self.assertTrue(bot.verify_audio_output(converted)[0])
+
+    def test_duration_tolerance_rejects_large_mismatch(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); a = root / "a.wav"; b = root / "b.wav"
+            write_wav(a, 1); write_wav(b, 2)
+            converted, detail = bot.compress_audio_file(a)
+            self.assertIsNotNone(converted, detail)
+            self.assertFalse(bot.verify_audio_output(converted, b)[0])
 
 
 class TestRepositoryHygiene(unittest.TestCase):
