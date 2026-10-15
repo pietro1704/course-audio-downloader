@@ -18,7 +18,9 @@ def get_text(url, referer):
             raw=response.read(8*1024**2+1)
             if len(raw)>8*1024**2: raise RuntimeError('player-response-too-large')
             return raw.decode('utf-8')
-    except Exception:
+    except Exception as error:
+        from urllib.error import HTTPError
+        if isinstance(error,HTTPError): error.close()
         raise RuntimeError('player-fetch-failed') from None
 
 def attributes(value):
@@ -110,7 +112,9 @@ def read_fragment(url,referer):
                 if not size or (length and length!=size): raise OSError('incomplete-segment')
                 return b''.join(chunks)
         except RuntimeError: raise
-        except Exception:
+        except Exception as error:
+            from urllib.error import HTTPError
+            if isinstance(error,HTTPError): error.close()
             if attempt==2: raise RuntimeError('player-segment-fetch-failed') from None
 
 def copy_hls_audio(candidate,destination,max_bytes,referer):
