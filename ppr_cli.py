@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from pipeline import Pipeline, Candidate
 import course_audio_bot as audio
 
-JS = """JSON.stringify({url:location.href,canonical:document.querySelector('link[rel=canonical]')?.href||'',title:document.title,ready:document.readyState,auth:(document.body?.innerText||'').slice(0,400).includes('Olá,'),links:Array.from(document.querySelectorAll('a[href],audio, audio source')).map(e=>({url:e.currentSrc||e.src||e.href||'',label:e.innerText||e.getAttribute('aria-label')||''}))})"""
+JS = """JSON.stringify({url:location.href,canonical:document.querySelector('link[rel=canonical]')?.href||'',title:document.title,ready:document.readyState,auth:(document.body?.innerText||'').slice(0,400).includes('Olá,'),frames:Array.from(document.querySelectorAll('iframe[src]')).map(e=>e.src),links:Array.from(document.querySelectorAll('a[href],audio, audio source')).map(e=>({url:e.currentSrc||e.src||e.href||'',label:e.innerText||e.getAttribute('aria-label')||''}))})"""
 
 def normalize_title(value):
     value = re.sub(r'\s+', ' ', value).strip().casefold()
@@ -27,6 +27,7 @@ class SafariAdapter:
         self.timeout = timeout
         self.max_source_bytes = max_source_bytes
         self.tab = None
+        self._hls_meta = {}
 
     @staticmethod
     def _osa(script):
@@ -79,7 +80,9 @@ end tell'''
             if download_control or path.endswith(('.mp3', '.m4a', '.aac', '.wav', '.ogg')):
                 (explicit if ('áudio' in label or 'mp3' in label) else other).append(Candidate(url, 'mp3' if download_control else 'audio'))
         # Never silently fall back to downloading a multi-GB movie.
-        return list({c.url: c for c in explicit + other}.values())
+        direct = list({c.url: c for c in explicit + other}.values())
+        if direct: return direct
+        return [Candidate(frame,'bunny-embed') for frame in page.get('frames',[]) if urlsplit(frame).scheme=='https' and urlsplit(frame).hostname=='player.mediadelivery.net' and urlsplit(frame).path.startswith('/embed/')]
 
     def resolve(self, value):
         lesson = {'url': value} if isinstance(value, str) else value
@@ -112,11 +115,20 @@ end tell'''
                 stable = stable + 1 if matches and key == previous else 0
                 previous = key
                 if stable >= 2:
+                    if candidates[0].kind == 'bunny-embed':
+                        from ppr_bunny import resolve_bunny
+                        frame = candidates[0].url
+                        candidate = resolve_bunny(frame, lesson['url'])
+                        self._hls_meta[candidate.url] = frame
+                        return [candidate]
                     return candidates
                 time.sleep(.5)
         raise RuntimeError('Safari-lesson-identity-timeout')
 
     def download(self, candidate, destination):
+        if candidate.kind == 'hls-audio':
+            from ppr_bunny import copy_hls_audio
+            return copy_hls_audio(candidate,destination,self.max_source_bytes,self._hls_meta[candidate.url])
         req = urllib.request.Request(candidate.url, headers={'User-Agent': 'Mozilla/5.0'})
         try:
             with urllib.request.urlopen(req, timeout=90) as response, destination.open('wb') as output:

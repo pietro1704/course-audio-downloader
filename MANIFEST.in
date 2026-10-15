@@ -3,3 +3,5 @@ include test_course_audio_bot.py test_pipeline.py pipeline_test.py test_hotmart.
 recursive-include docs *.md
 
 include test_ppr_extensionless.py
+
+include test_bunny.py
