@@ -154,7 +154,7 @@ class Pipeline:
             originals.mkdir(exist_ok=True)
             suffix = Path(urlsplit(candidate.url).path).suffix.lower()
             if suffix not in audio.AUDIO_EXTS + audio.VIDEO_EXTS:
-                suffix = '.m4a' if candidate.kind == 'hls-audio' else '.media'
+                suffix = '.m4a' if candidate.kind == 'hls-audio' else '.mp3' if candidate.kind == 'mp3' else '.media'
             t = time.monotonic()
             got = Path(self.adapter.download(candidate, work / ('source' + suffix)))
             timings['download'] = time.monotonic() - t

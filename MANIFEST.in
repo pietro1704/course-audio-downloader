@@ -1,3 +1,5 @@
 include LICENSE README.md config.example.toml uv.lock .gitignore
 include test_course_audio_bot.py test_pipeline.py pipeline_test.py test_hotmart.py
 recursive-include docs *.md
+
+include test_ppr_extensionless.py

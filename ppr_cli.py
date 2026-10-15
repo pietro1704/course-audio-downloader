@@ -75,8 +75,9 @@ end tell'''
             label = normalize_title(entry.get('label', ''))
             if not url.startswith(('https://', 'http://')):
                 continue
-            if path.endswith(('.mp3', '.m4a', '.aac', '.wav', '.ogg')):
-                (explicit if ('áudio' in label or 'mp3' in label) else other).append(Candidate(url, 'audio'))
+            download_control = 'áudio da aula' in label and 'mp3' in label
+            if download_control or path.endswith(('.mp3', '.m4a', '.aac', '.wav', '.ogg')):
+                (explicit if ('áudio' in label or 'mp3' in label) else other).append(Candidate(url, 'mp3' if download_control else 'audio'))
         # Never silently fall back to downloading a multi-GB movie.
         return list({c.url: c for c in explicit + other}.values())
 
