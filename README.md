@@ -36,3 +36,26 @@ External embeds can use the optional `extractor` profile mode after `uv sync --e
 `course-supervise --spec /path/to/private-supervisor.json --dry-run` validates a fixed queue and isolated engine without writes or launches. Remove `--dry-run` to adopt the configured live worker and retry only failed runs after receipt/native-cloud preflight. It reaps owned children, detects changed process identity, refuses changed queue scope, serializes supervisors per root and bounds retries without progress. An interrupted worker stays stopped; cancelling monitoring leaves active downloads running. The private spec supplies `root`, `catalog`, `profile`, `destination`, `icloud_python`, worker `python`, immutable `engine` (with `engine.json` file hashes), `initial_worker_pid`, `start`, `concurrency` and `expected_partition_count`. It never closes or selects Safari windows/tabs. Existing configured browser-target identity checks apply to every worker.
 
 Embedded JSON profiles can opt into `navigation_mode: "matching-link"` to reuse the site's initialized application through a matching lesson link. Declare any ignorable tracking parameters in `navigation_ignored_query_keys` (default: none). Other query values, origins, new-window targets, download links and disabled controls never match. First resolution, missing links, revisits and changed predecessor/player state use the original URL-assignment reload, including credential refresh. A one-use context is granted only after successful media resolution, so failed navigation or metadata cannot authorize a subsequent click. Existing stable page/player/media identity checks remain required. Measure with the real site before enabling this option; UI timing does not guarantee whole-course throughput.
+
+### Documentos das aulas
+
+`course-deliver` também inventaria e entrega os documentos originais de todas as
+aulas selecionadas, inclusive quando o áudio já está concluído. Os documentos
+ficam em `curso/módulo/aula/nome original`, sem conversão. A limpeza local exige
+confirmação nativa do iCloud e comparação dos bytes. O diário de documentos é
+separado do diário de áudio e permite retomar uma publicação interrompida.
+
+Use `--documents-only` para preencher os anexos sem baixar ou converter áudio.
+`--documents-only --dry-run` valida as transações existentes sem criar arquivos;
+`--probe N` também visita N aulas para conferir o inventário, sem baixar anexos.
+
+O perfil local deve declarar `browser_target` para a aba dedicada. Por padrão, a
+descoberta procura links com `download` ou extensões de documentos. Sites com
+painéis dinâmicos podem declarar `documents.links_selector`, `ready_expression`,
+`items_expression` e `panel_script`. Essas expressões JavaScript são configuração
+local confiável, executada somente após verificar URL, título e identidades da
+aula. `items_expression` retorna uma lista de `{id, name, url, size?, mime?}`;
+`id` precisa ser estável mesmo quando a URL assinada muda. URLs de download ficam
+somente em memória. Não inclua credenciais no perfil ou no repositório. Recursos
+de áudio e vídeo são excluídos do inventário de documentos. Sessão expirada e
+três falhas consecutivas de inventário encerram a fila preservando os originais.
