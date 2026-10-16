@@ -155,7 +155,7 @@ class TemplateTests(unittest.TestCase):
     def test_cli_returns_monitor_to_running_after_cover_refresh(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); cat, _ = self.catalog(root)
-            args = ['--profile', str(root/'profile.json'), '--catalog', str(cat), '--root', str(root/'work'), '--destination', str(root/'cloud'), '--icloud-python', 'python']
+            args = ['--profile', str(root/'profile.json'), '--catalog', str(cat), '--root', str(root/'work'), '--destination', str(root/'cloud'), '--icloud-python', 'python', '--refresh-completed-artwork']
             with patch('course_cli.Delivery') as cls, patch('course_cli.NativeCloud'), patch('builtins.print'):
                 cls.return_value.completed_count.return_value = 1
                 cls.return_value.journal = {Pipeline.identity(URL): dict(state='complete', artwork={'origin':'none'})}
