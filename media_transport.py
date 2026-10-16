@@ -26,7 +26,7 @@ def get_text(url, referer):
 def attributes(value):
     return {k:v.strip('"') for k,v in re.findall(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)',value)}
 
-def select_rendition(master, text):
+def select_rendition(master, text, audio_only=False):
     if not text.lstrip().startswith('#EXTM3U'): raise RuntimeError('invalid-player-playlist')
     lines=[line.strip() for line in text.splitlines() if line.strip()]
     audio=[];variants=[]
@@ -44,6 +44,7 @@ def select_rendition(master, text):
             variants.append((only_audio,int(attrs.get('BANDWIDTH','0')),urljoin(master,lines[i+1])))
     if audio: selected=sorted(audio)[0][1]
     elif any(v[0] for v in variants): selected=max((v for v in variants if v[0]),key=lambda v:v[1])[2]
+    elif audio_only: return None
     elif variants:
         # Muxed resolutions can carry different audio bitrates: preserve the
         # highest advertised source quality, then discard video during remux.
