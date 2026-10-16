@@ -29,6 +29,15 @@ unchanged; this option does not rewrite stored receipts or bypass page checks.
 
 The bounded pipeline supports 1–8 lessons concurrently, with browser resolution serialized. Audio is AAC-LC mono, 44100 Hz, target 32 kbps. Original attached artwork takes priority; absent artwork falls back to the matching video thumbnail, then allows audio without a cover. Validate actual throughput before increasing concurrency further.
 
+Repeated source bytes across distinct lessons are rejected by default. When the
+site intentionally reuses a recording, each affected catalogue lesson may list
+the other lesson URLs in `shared_source_with`. Permissions must be reciprocal
+and reference lessons in the same catalogue. This permits identical source bytes
+only among the declared peers; every lesson still resolves and validates its own
+source and output, preserving its title, path, and identity. Manifests store only
+the peer identity hashes. Multiple owners remain registered across retries so
+failure or cancellation cannot remove another lesson's source ownership.
+
 Delivery uses `Documentacao/delivery.lock`, `delivery-journal.json`, `delivery-status.json` and `pipeline-manifest.jsonl`. A verified native iCloud upload is required before deleting the matching original and evicting the local cloud cache. Prepared receipts resume without another download. A completed no-cover receipt does not repeat its prior optional artwork lookup on restart; use `--refresh-completed-artwork` explicitly to retry missing covers. First-pass embedded artwork and matching-video fallback always run during conversion. Cancellation drains submitted tasks and preserves sources. See [delivery details](docs/sequential-icloud.md).
 
 Run the same regression gate as CI (Node 22+ is needed for generated browser-JavaScript contract tests):

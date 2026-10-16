@@ -42,13 +42,33 @@ class Pipeline:
         self._reserved = 0
         self._stop = threading.Event()
         self._records = self.records()
-        self._source_owners = {r['source_hash']: key for key, r in self._records.items()
-                               if r.get('status') == 'ok' and r.get('source_hash')}
+        self._source_owners = {}
+        for key, record in self._records.items():
+            if record.get('status') == 'ok' and record.get('source_hash'):
+                self._source_owners.setdefault(record['source_hash'], set()).add(key)
 
     @staticmethod
     def identity(url):
         p = urlsplit(url)
         return hashlib.sha256(urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path.rstrip('/'), '', '')).encode()).hexdigest()
+
+    @staticmethod
+    def shared_source_identities(lesson):
+        references = lesson.get('shared_source_with', [])
+        if not isinstance(references, list):
+            raise ValueError('invalid-shared-source-permission')
+        identities = set()
+        for reference in references:
+            if not isinstance(reference, str) or any(ord(c) <= 32 for c in reference):
+                raise ValueError('invalid-shared-source-permission')
+            parsed = urlsplit(reference)
+            if (parsed.scheme != 'https' or not parsed.hostname or
+                    parsed.username or parsed.password):
+                raise ValueError('invalid-shared-source-permission')
+            identities.add(Pipeline.identity(reference))
+        if len(identities) != len(references) or Pipeline.identity(lesson['url']) in identities:
+            raise ValueError('invalid-shared-source-permission')
+        return identities
 
     @staticmethod
     def sha256(path):
@@ -145,6 +165,7 @@ class Pipeline:
         work = None
         source_claimed = None
         try:
+            shared_with = self.shared_source_identities(lesson)
             with self._resolve_lock:
                 if self._stop.is_set():
                     return {'status': 'cancelled', 'source_identity': ident}
@@ -173,10 +194,10 @@ class Pipeline:
             timings['download'] = time.monotonic() - t
             source_hash = self.sha256(got)
             with self._state_lock:
-                owner = self._source_owners.get(source_hash)
-                if owner and owner != ident:
+                owners = self._source_owners.setdefault(source_hash, set())
+                if owners - shared_with - {ident}:
                     raise RuntimeError('duplicate-source-different-lesson')
-                self._source_owners[source_hash] = ident
+                owners.add(ident)
                 source_claimed = source_hash
             # Move immutable bytes, not a second multi-gigabyte copy.
             original = originals / (stem + suffix)
@@ -224,6 +245,8 @@ class Pipeline:
                       'provider_identity_verified': True, 'validation_version': 2,
                       'artwork': cover,
                       'timings': timings, 'duration_seconds': duration}
+            if shared_with:
+                record['shared_source_identities'] = sorted(shared_with)
             self.write(record)
             shutil.rmtree(work)
             return record
@@ -235,9 +258,12 @@ class Pipeline:
                 quarantine.parent.mkdir(exist_ok=True)
                 os.replace(work, quarantine)
             with self._state_lock:
-                if source_claimed and self._source_owners.get(source_claimed) == ident:
-                    self._source_owners.pop(source_claimed, None)
-            reason = str(error) if str(error) in {'disk-reserve', 'duplicate-source-different-lesson', 'no-audio-candidate', 'output-validation-failed'} else type(error).__name__
+                if source_claimed:
+                    owners = self._source_owners.get(source_claimed, set())
+                    owners.discard(ident)
+                    if not owners:
+                        self._source_owners.pop(source_claimed, None)
+            reason = str(error) if str(error) in {'disk-reserve', 'duplicate-source-different-lesson', 'invalid-shared-source-permission', 'no-audio-candidate', 'output-validation-failed'} else type(error).__name__
             record = {'status': 'failed', 'source_identity': ident, 'reason': reason, 'timings': timings}
             self.write(record)
             return record
