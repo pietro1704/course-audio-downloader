@@ -1,4 +1,4 @@
-"""Authenticated Bunny player fallback; signed addresses remain memory-only."""
+"""Configurable embedded player and bounded stream transport; signed addresses remain memory-only."""
 import re
 import urllib.request
 from html.parser import HTMLParser
@@ -6,10 +6,10 @@ from urllib.parse import urljoin, urlsplit
 from pipeline import Candidate
 
 class Player(HTMLParser):
-    def __init__(self):
-        super().__init__(); self.players=[]
+    def __init__(self, element):
+        super().__init__(); self.players=[]; self.element=element
     def handle_starttag(self,tag,attrs):
-        if tag=='bunny-stream-video': self.players.append(dict(attrs))
+        if tag==self.element: self.players.append(dict(attrs))
 
 def get_text(url, referer):
     request=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':referer})
@@ -53,21 +53,32 @@ def select_rendition(master, text):
     if urlsplit(selected).scheme!='https': raise RuntimeError('unsafe-player-media-url')
     return selected
 
-def resolve_bunny(frame, lesson_url):
-    parsed=urlsplit(frame)
-    parts=parsed.path.strip('/').split('/')
-    if parsed.scheme!='https' or parsed.hostname!='player.mediadelivery.net' or len(parts)!=3 or parts[0]!='embed':
-        raise RuntimeError('unsupported-player-frame')
-    parser=Player();parser.feed(get_text(frame,lesson_url))
-    players=[p for p in parser.players if p.get('video-id')==parts[2] and p.get('library-id')==parts[1]]
+def _player(frame, lesson_url, profile):
+    from site_profile import player_fields
+    fields=player_fields(frame,profile)
+    parser=Player(profile.get('element','media-player'));parser.feed(get_text(frame,lesson_url))
+    identities=profile.get('identity_attributes',{'video':'video-id','library':'library-id'})
+    players=[p for p in parser.players if all(p.get(attr)==fields.get(key) for key,attr in identities.items())]
     if len(players)!=1: raise RuntimeError('player-identity-mismatch')
-    player=players[0]
-    if player.get('drm-version')!='0': raise RuntimeError('drm-media-not-supported')
-    master=player.get('content-src','')
+    return players[0]
+
+def resolve_player(frame, lesson_url, profile=None):
+    profile=profile or {}
+    player=_player(frame,lesson_url,profile)
+    policy=profile.get('unprotected_attributes')
+    if not policy or any(player.get(key) not in allowed for key,allowed in policy.items()):
+        raise RuntimeError('drm-media-not-supported')
+    master=player.get(profile.get('media_attribute','content-src'),'')
     if urlsplit(master).scheme!='https' or '.m3u8' not in urlsplit(master).path:
         raise RuntimeError('missing-player-hls')
-    selected=select_rendition(master,get_text(master,frame))
-    return Candidate(selected,'hls-audio')
+    return Candidate(select_rendition(master,get_text(master,frame)),'hls-audio')
+
+def thumbnail_player(frame, lesson_url, profile=None):
+    profile=profile or {}
+    try:player=_player(frame,lesson_url,profile)
+    except RuntimeError:return None
+    url=player.get(profile.get('poster_attribute','poster'),'')
+    return url if urlsplit(url).scheme=='https' else None
 
 def plain_segments(url,text):
     import math
@@ -123,8 +134,8 @@ def copy_hls_audio(candidate,destination,max_bytes,referer):
     import course_audio_bot as audio
     parsed=plain_segments(candidate.url,get_text(candidate.url,referer))
     if parsed is None:
-        from hotmart_cli import HotmartAdapter
-        adapter=HotmartAdapter(max_source_bytes=max_bytes)
+        from embedded_adapter import EmbeddedAdapter
+        adapter=EmbeddedAdapter(max_source_bytes=max_bytes)
         adapter._meta[candidate.url]={'referer':referer}
         return adapter.download(candidate,destination)
     segments,expected=parsed
