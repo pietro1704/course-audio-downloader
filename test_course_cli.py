@@ -144,7 +144,7 @@ class CompletedArtworkPolicyTests(unittest.TestCase):
     def invoke(self, refresh=False, failure=None):
         catalog,profile,lesson=self.inputs('resume')
         root=self.base/'work';events=[];ident=Pipeline.identity(lesson['url'])
-        with patch('course_cli.Progress') as progress,patch('course_cli.Delivery') as cls,patch('course_cli.build_adapter'),patch('course_cli.NativeCloud'):
+        with patch('course_cli.Progress') as progress,patch('course_cli.Delivery') as cls,patch('course_cli.build_adapter'),patch('course_cli.NativeCloud'),patch('course_cli.DocumentDelivery'):
             delivery=cls.return_value
             delivery.journal={ident:dict(state='complete',artwork={'origin':'none'})}
             delivery.completed_count.return_value=1

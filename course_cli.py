@@ -15,6 +15,8 @@ from site_profile import load_profile
 from cloud_delivery import Delivery,NativeCloud,Progress
 from pipeline import Pipeline,PRESET
 from icloud_bridge import uploaded
+from documents import DocumentDelivery, document_preflight
+from document_browser import DocumentBrowser
 
 
 def build_adapter(profile,encoder='aac_at'):
@@ -80,6 +82,7 @@ def main(argv=None):
     p.add_argument('--limit',type=int);p.add_argument('--start',type=int,default=0)
     p.add_argument('--min-free-gib',type=float,default=4)
     p.add_argument('--dry-run',action='store_true');p.add_argument('--probe',type=int,default=0)
+    p.add_argument('--documents-only',action='store_true',help='Backfill original lesson documents without audio processing')
     p.add_argument('--refresh-completed-artwork',action='store_true',
                    help='Explicitly retry missing covers on completed native uploads before delivery')
     args=p.parse_args(argv)
@@ -92,6 +95,12 @@ def main(argv=None):
     if args.dry_run:
         # No Delivery/Progress construction, mkdir, lock creation, downloads or cleanup.
         cloud=NativeCloud(args.icloud_python)
+        document_rows=document_preflight(lessons,profile,root,destination,cloud)
+        if args.documents_only:
+            browser=DocumentBrowser(profile=profile) if args.probe else None
+            for lesson in lessons[:args.probe]:browser.inventory(lesson)
+            print(json.dumps(dict(schema='course-documents-dry-run/v1',ok=True,total=len(lessons),
+                probed=min(args.probe,len(lessons)),lessons=document_rows),ensure_ascii=False));return 0
         rows=preflight(lessons,profile,root,destination,cloud)
         pending=[lesson for lesson,row in zip(lessons,rows) if row['state']!='complete']
         adapter=build_adapter(profile,args.encoder) if args.probe else None
@@ -101,7 +110,15 @@ def main(argv=None):
                     complete=sum(x['state']=='complete' for x in rows),uploaded=sum(x['state']=='uploaded' for x in rows),prepared=sum(x['state']=='prepared' for x in rows),
                     pending=sum(x['state']=='pending' for x in rows),probed=min(args.probe,len(pending)),
                     concurrency=args.concurrency,lessons=rows)
+        report['document_lessons']=document_rows
         print(json.dumps(report,ensure_ascii=False));return 0
+    documents=DocumentDelivery(root,destination,NativeCloud(args.icloud_python),
+        adapter=DocumentBrowser(profile=profile),concurrency=args.concurrency,
+        reserve_bytes=int(args.min_free_gib*1024**3))
+    if args.documents_only:
+        try:documents.run(lessons);return 0
+        except KeyboardInterrupt:documents.cancel();return 130
+        except Exception:return 2
     docs=root/'Documentacao';docs.mkdir(parents=True,exist_ok=True)
     with (docs/'delivery.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -123,9 +140,10 @@ def main(argv=None):
                         and receipt.get('artwork',{}).get('origin')=='none'):
                     delivery.refresh_completed_artwork(lesson,target)
             progress.event('running');delivery.run(work,start_index=args.start)
+            documents.run(lessons)
             progress.event('finished',delivered=delivery.completed_count());return 0
         except KeyboardInterrupt:
-            delivery.cancel();progress.event('interrupted',delivered=delivery.completed_count());return 130
+            delivery.cancel();documents.cancel();progress.event('interrupted',delivered=delivery.completed_count());return 130
         except Exception:
             progress.event('failed',reason='course-delivery-failed',delivered=delivery.completed_count());return 2
         finally:stopped.set();worker.join(timeout=2)
