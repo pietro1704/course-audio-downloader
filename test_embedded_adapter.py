@@ -39,6 +39,44 @@ class EmbeddedTests(unittest.TestCase):
         self.assertEqual(result[0].kind,'hls-audio')
         self.assertEqual(sum(bool(c.args) for c in ev.call_args_list),1)
 
+    def resolve_with_artwork(self, image, thumbnail_path=None, **overrides):
+        lesson={'url':'https://portal.example.test/product/content/ABC','title':'Aula'}
+        adapter=EmbeddedAdapter(timeout=1)
+        adapter.profile['thumbnail_path']=thumbnail_path if thumbnail_path is not None else ['visual','cover']
+        payload={'visual':{'cover':image},'visuals':[{}, {'cover':image}],'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn.test/audio.m3u8?token=PRIVATE'}]}}}}
+        page={'url':lesson['url'],'title':'Aula','ready':'complete','active':[{'path':'/product/content/ABC','title':'Aula'}],'iframes':['https://embed.example.test/embed/clip']}
+        page.update(overrides)
+        with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">'+json.dumps(payload)+'</script>') as fetch,patch('embedded_adapter.time.sleep'):
+            result=adapter.resolve(lesson)
+        fetch.assert_called_once()
+        return result[0]
+
+    def test_configured_artwork_is_bound_to_resolved_embedded_media(self):
+        candidate=self.resolve_with_artwork('https://cdn.test/artwork.jpg?token=PRIVATE')
+        self.assertEqual(candidate.thumbnail_url,'https://cdn.test/artwork.jpg?token=PRIVATE')
+        self.assertEqual(candidate.referer,'https://embed.example.test/embed/clip')
+        self.assertNotIn('PRIVATE',repr(candidate).replace(candidate.url,''))
+
+    def test_missing_or_unsafe_embedded_artwork_does_not_reject_audio(self):
+        for image in [None,{},[],17,'http://cdn.test/artwork.jpg','file:///private/artwork.jpg','https:///missing-host','https://[invalid/artwork.jpg','https://user:pass@cdn.test/artwork.jpg']:
+            with self.subTest(image=image):
+                candidate=self.resolve_with_artwork(image)
+                self.assertIsNone(candidate.thumbnail_url)
+                self.assertEqual(candidate.kind,'hls-audio')
+
+    def test_configured_array_path_and_invalid_indices(self):
+        image='https://cdn.test/artwork.jpg'
+        self.assertEqual(self.resolve_with_artwork(image,thumbnail_path=['visuals',1,'cover']).thumbnail_url,image)
+        for path in [[],['visuals',3,'cover'],['visuals',-1,'cover'],['visuals',True,'cover'],['absent','cover']]:
+            with self.subTest(path=path):self.assertIsNone(self.resolve_with_artwork(image,thumbnail_path=path).thumbnail_url)
+
+    def test_cancelled_embedded_metadata_fetch_propagates(self):
+        adapter=EmbeddedAdapter(timeout=1)
+        lesson={'url':'https://portal.example.test/product/content/ABC','title':'Aula'}
+        page={'url':lesson['url'],'title':'Aula','ready':'complete','active':[{'path':'/product/content/ABC','title':'Aula'}],'iframes':['https://embed.example.test/embed/clip']}
+        with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html',side_effect=KeyboardInterrupt()),patch('embedded_adapter.time.sleep'):
+            with self.assertRaises(KeyboardInterrupt):adapter.resolve(lesson)
+
     def test_rejects_lookalike_host(self):
         with self.assertRaisesRegex(RuntimeError,'unsupported-provider'):
             EmbeddedAdapter().resolve({'url':'https://portal.example.test.evil/x','title':'Aula'})
