@@ -48,7 +48,12 @@ def media_thumbnail(data, profile):
 class EmbeddedAdapter(SafariAdapter):
     def __init__(self, timeout=60, max_source_bytes=512*1024**2, profile=None, encoder='aac'):
         super().__init__(timeout,max_source_bytes,encoder,profile)
-        self._meta={};self._last_media=None
+        self._meta={};self._last_media=None;self._link_context=None
+
+    def _take_link_navigation_context(self):
+        context=self._link_context
+        self._link_context=None  # A failed navigation/resolve cannot authorize another click.
+        return context
 
     def _eval_embedded(self,navigate=None):return self._eval(navigate)
 
@@ -81,6 +86,10 @@ class EmbeddedAdapter(SafariAdapter):
                     from media_transport import get_text,select_rendition
                     media=select_rendition(media,get_text(media,src),audio_only=True) or media
                 candidate=Candidate(media,'hls-audio',referer=src,thumbnail_url=media_thumbnail(payload,self.profile));self._meta[candidate.url]={'referer':src};self._last_media=(wanted,urlsplit(src).path)
+                frame=urlsplit(src)
+                origin=frame.scheme+'://'+(frame.hostname or '')
+                if frame.port and frame.port!=443:origin+=':'+str(frame.port)
+                self._link_context=dict(page_path=wanted,player=origin+frame.path)
                 return [candidate]
             time.sleep(.5)
         raise RuntimeError('embedded-lesson-identity-timeout')

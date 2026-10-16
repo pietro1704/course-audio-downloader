@@ -8,7 +8,7 @@ import urllib.request
 from dataclasses import replace
 from urllib.parse import urlsplit
 from pipeline import Candidate
-from site_profile import inspection_script, identity_matches
+from site_profile import inspection_script, identity_matches, navigation_script
 
 
 def normalize_title(value, suffix_pattern=None):
@@ -49,9 +49,18 @@ class SafariAdapter:
             raise RuntimeError('unsupported-lesson')
         if self.origin is None: self.origin = origin
 
-    def _eval(self, navigate=None):
+    def _take_link_navigation_context(self):
+        return None
+
+    def _eval(self, navigate=None, *, force_reload=False):
         if not self.origin: raise RuntimeError('missing-profile-origin')
         command = ('set URL of t to ' + json.dumps(navigate, ensure_ascii=False) + '\nreturn "navigation-requested"') if navigate else ('return do JavaScript ' + json.dumps(inspection_script(self.profile), ensure_ascii=False) + ' in t')
+        context=None
+        if navigate and not force_reload and self.profile.get('navigation_mode')=='matching-link':
+            context=self._take_link_navigation_context()
+        fast=context is not None
+        if fast:
+            command='return do JavaScript '+json.dumps(navigation_script(navigate,self.profile,context),ensure_ascii=False)+' in t'
         script = '''tell application "Safari"
 repeat with w in windows
 repeat with t in tabs of w
@@ -73,6 +82,9 @@ end tell'''
                       '\nif (URL of t) starts with ' + json.dumps(self.origin.rstrip('/') + '/') +
                       ' then\n' + command + '\nend if\nerror "Browser target changed"\nend tell')
         result = self._osa(script)
+        if fast:
+            if result=='reload-required':return self._eval(navigate,force_reload=True)
+            if result!='link-clicked':raise RuntimeError('Safari-navigation-failed')
         return {} if navigate else json.loads(result)
 
     @staticmethod

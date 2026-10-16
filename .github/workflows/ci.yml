@@ -17,6 +17,9 @@ jobs:
         run: uv python install 3.11
       - name: Sync
         run: uv sync
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Tests
         run: uv run python -m unittest -v
       - name: Repository hygiene check
