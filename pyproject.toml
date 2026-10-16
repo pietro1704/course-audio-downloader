@@ -4,13 +4,16 @@ version = "0.1.3rc4"
 description = "Personal authenticated course audio downloader"
 requires-python = ">=3.11"
 dependencies = []
+[project.optional-dependencies]
+extractor = ["yt-dlp>=2026.8.19"]
+
 [project.scripts]
 course-audio-bot = "course_audio_bot:main"
 course-deliver = "course_cli:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter"]
+py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter"]
 
 [build-system]
 requires = ["setuptools>=68"]

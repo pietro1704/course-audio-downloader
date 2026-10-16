@@ -62,6 +62,16 @@ end repeat
 end repeat
 error "No matching browser tab"
 end tell'''
+        target = self.profile.get('browser_target')
+        if target is not None:
+            if (not isinstance(target, dict) or
+                    any(type(target.get(key)) is not int or target[key] < 1
+                        for key in ('window_id', 'tab_index'))):
+                raise ValueError('invalid-browser-target')
+            script = ('tell application "Safari"\nset t to tab ' + str(target['tab_index']) +
+                      ' of window id ' + str(target['window_id']) +
+                      '\nif (URL of t) starts with ' + json.dumps(self.origin.rstrip('/') + '/') +
+                      ' then\n' + command + '\nend if\nerror "Browser target changed"\nend tell')
         result = self._osa(script)
         return {} if navigate else json.loads(result)
 

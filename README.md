@@ -17,7 +17,7 @@ Remove `--dry-run --probe 4` to deliver the selected catalogue. Dry run checks c
 
 Catalogues use `course-catalog/v1`, complete counts and lesson `title`, `url`, `site_path`; optional `page_title` and `page_identity` bind site headings and IDs. The final component of `site_path` is the exact lesson title; the output adds `.m4a`. Module catalogues may instead provide `title`, `modules[].title` and `modules[].lessons`. Legacy unversioned catalogues are accepted; unknown schemas are rejected.
 
-Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedded-json` or `template-hls`. Selectors, title suffixes, identity expressions, player patterns and URL templates belong to the local profile. Treat profiles as trusted local code: identity expressions execute read-only JavaScript in Safari. Examples and contracts are documented in [docs/template-profile.md](docs/template-profile.md).
+Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedded-json`, `template-hls` or `extractor`. Selectors, title suffixes, identity expressions, player patterns and URL templates belong to the local profile. Treat profiles as trusted local code: identity expressions execute read-only JavaScript in Safari. Examples and contracts are documented in [docs/template-profile.md](docs/template-profile.md).
 
 The bounded pipeline supports 1–8 lessons concurrently, with browser resolution serialized. Audio is AAC-LC mono, 44100 Hz, target 32 kbps. Original attached artwork takes priority; absent artwork falls back to the matching video thumbnail, then allows audio without a cover. Validate actual throughput before increasing concurrency further.
 
@@ -30,3 +30,5 @@ python -m unittest -v
 ```
 
 The generic `course-audio-bot` command also supports the older TOML/yt-dlp workflow; see `config.example.toml` and `course-audio-bot --help`. It does not use the native iCloud delivery receipts.
+
+External embeds can use the optional `extractor` profile mode after `uv sync --extra extractor`. Its `extractor.url_pattern` is a full HTTPS URL regex with a named `id` capture; the adapter validates extracted metadata against that identity (and optional lesson `external_media_id`) and downloads one bounded HTTPS audio-only format. Unsupported/live/protected media fail without publishing. Browser cookies are not exported. Use `links_selector` to scope authored media links; `browser_target: {"window_id": 42, "tab_index": 3}` optionally binds resolution to an existing dedicated Safari tab and fails if it changes origin. This allows another worker to use a separate tab. Keep those ephemeral window/tab values in private profiles.
