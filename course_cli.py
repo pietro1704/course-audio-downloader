@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import math
 import shutil
 import threading
 from pathlib import Path
@@ -81,12 +82,16 @@ def main(argv=None):
     p.add_argument('--encoder',choices=['aac','aac_at'],default='aac_at')
     p.add_argument('--limit',type=int);p.add_argument('--start',type=int,default=0)
     p.add_argument('--min-free-gib',type=float,default=4)
+    p.add_argument('--upload-timeout',type=float,default=900,
+                   help='Maximum seconds to wait for iCloud upload confirmation (1–21600)')
     p.add_argument('--dry-run',action='store_true');p.add_argument('--probe',type=int,default=0)
     p.add_argument('--documents-only',action='store_true',help='Backfill original lesson documents without audio processing')
     p.add_argument('--refresh-completed-artwork',action='store_true',
                    help='Explicitly retry missing covers on completed native uploads before delivery')
     args=p.parse_args(argv)
-    if args.start<0 or (args.limit is not None and args.limit<1) or args.min_free_gib<4 or args.probe<0:
+    if (args.start<0 or (args.limit is not None and args.limit<1) or args.min_free_gib<4
+            or args.probe<0 or not math.isfinite(args.upload_timeout)
+            or not 1<=args.upload_timeout<=21600):
         p.error('invalid numeric boundary')
     profile=load_profile(args.profile);all_lessons=load_lessons(args.catalog)
     lessons=all_lessons[args.start:args.start+args.limit if args.limit is not None else None]
@@ -126,7 +131,8 @@ def main(argv=None):
             print(json.dumps({'reason':'another-run-is-active'}));return 2
         progress=Progress(root,selected=len(lessons),concurrency=args.concurrency)
         delivery=Delivery(root,destination,NativeCloud(args.icloud_python),adapter=build_adapter(profile,args.encoder),
-                          reserve_bytes=int(args.min_free_gib*1024**3),concurrency=args.concurrency,event=progress.event)
+                          reserve_bytes=int(args.min_free_gib*1024**3),concurrency=args.concurrency,
+                          upload_timeout=args.upload_timeout,event=progress.event)
         progress.current['delivered']=delivery.completed_count()
         work=[(lesson,destination/relative_audio_path(lesson)) for lesson in lessons]
         stopped=threading.Event()

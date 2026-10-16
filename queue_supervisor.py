@@ -58,6 +58,10 @@ class Supervisor:
         self.hours=hours;self.no_progress=0;self.pid=spec['initial_worker_pid']
         if type(self.pid) is not int or self.pid<1:raise ValueError('invalid-worker-pid')
         if type(spec['start']) is not int or spec['start']<0 or spec['concurrency'] not in range(1,9):raise ValueError('invalid-queue-boundary')
+        upload_timeout=spec.get('upload_timeout',900)
+        if type(upload_timeout) not in (int,float) or not 1<=upload_timeout<=21600:
+            raise ValueError('invalid-upload-timeout')
+        self.spec['upload_timeout']=upload_timeout
 
     def queue(self):
         lessons=load_lessons(self.spec['catalog'])[self.spec['start']:]
@@ -105,7 +109,7 @@ class Supervisor:
         command=[spec['python'],str(self.engine()/'course_cli.py'),'--catalog',spec['catalog'],
                  '--profile',spec['profile'],'--root',spec['root'],'--destination',spec['destination'],
                  '--icloud-python',spec['icloud_python'],'--concurrency',str(spec['concurrency']),
-                 '--start',str(spec['start'])]
+                 '--start',str(spec['start']),'--upload-timeout',str(spec['upload_timeout'])]
         with (self.docs/'delivery.log').open('a') as log:
             child=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         # Retain ownership before anything else can fail; never lose the live handle.
@@ -114,7 +118,8 @@ class Supervisor:
         if self.awake_child is not None:self.helpers.append(self.awake_child)
         meta=read(self.docs/'worker.json',{});meta.update(pid=self.pid,started_at=time.time(),
                     previous_pid=previous,selected=len(rows),start=spec['start'],concurrency=spec['concurrency'],
-                    commit=spec.get('commit'),isolated_engine=True,resume_monitor=True,
+                    upload_timeout=spec['upload_timeout'],commit=spec.get('commit'),
+                    isolated_engine=True,resume_monitor=True,
                     awake_pid=self.awake_child.pid if self.awake_child else None)
         atomic_json(self.docs/'worker.json',meta)
         return ProcessRef(child.pid,child)
