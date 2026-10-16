@@ -39,10 +39,11 @@ class EmbeddedTests(unittest.TestCase):
         self.assertEqual(result[0].kind,'hls-audio')
         self.assertEqual(sum(bool(c.args) for c in ev.call_args_list),1)
 
-    def resolve_with_artwork(self, image, thumbnail_path=None, **overrides):
+    def resolve_with_artwork(self, image, thumbnail_path=None, profile_overrides=None, **overrides):
         lesson={'url':'https://portal.example.test/product/content/ABC','title':'Aula'}
         adapter=EmbeddedAdapter(timeout=1)
         adapter.profile['thumbnail_path']=thumbnail_path if thumbnail_path is not None else ['visual','cover']
+        adapter.profile.update(profile_overrides or {})
         payload={'visual':{'cover':image},'visuals':[{}, {'cover':image}],'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn.test/audio.m3u8?token=PRIVATE'}]}}}}
         page={'url':lesson['url'],'title':'Aula','ready':'complete','active':[{'path':'/product/content/ABC','title':'Aula'}],'iframes':['https://embed.example.test/embed/clip']}
         page.update(overrides)
@@ -77,6 +78,30 @@ class EmbeddedTests(unittest.TestCase):
         with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html',side_effect=KeyboardInterrupt()),patch('embedded_adapter.time.sleep'):
             with self.assertRaises(KeyboardInterrupt):adapter.resolve(lesson)
 
+    def test_opted_in_audio_rendition_preserves_artwork_and_referer(self):
+        master='#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,DEFAULT=YES,URI="track.m3u8?token=PRIVATE"\n#EXT-X-STREAM-INF:BANDWIDTH=1000,CODECS="mp4a.40.2,avc1"\nvideo.m3u8'
+        with patch('media_transport.get_text',return_value=master) as fetch:
+            candidate=self.resolve_with_artwork('https://cdn.test/cover.jpg',profile_overrides={'prefer_audio_rendition':True})
+        self.assertEqual(candidate.url,'https://cdn.test/track.m3u8?token=PRIVATE')
+        self.assertEqual(candidate.thumbnail_url,'https://cdn.test/cover.jpg')
+        self.assertEqual(candidate.referer,'https://embed.example.test/embed/clip')
+        fetch.assert_called_once_with('https://cdn.test/audio.m3u8?token=PRIVATE',candidate.referer)
+
+    def test_audio_rendition_falls_back_to_master_without_changing_muxed_quality(self):
+        master='#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000,CODECS="mp4a.40.2,avc1"\nvideo.m3u8'
+        with patch('media_transport.get_text',return_value=master):
+            candidate=self.resolve_with_artwork(None,profile_overrides={'prefer_audio_rendition':True})
+        self.assertEqual(candidate.url,'https://cdn.test/audio.m3u8?token=PRIVATE')
+        with patch('media_transport.get_text',side_effect=AssertionError('opt-in required')):
+            self.resolve_with_artwork(None)
+
+    def test_audio_rendition_invalid_manifest_and_cancellation_are_not_suppressed(self):
+        for manifest,error in [('not a playlist',RuntimeError),('#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,DEFAULT=YES,URI="http://cdn.test/unsafe.m3u8"',RuntimeError),(None,KeyboardInterrupt)]:
+            with self.subTest(manifest=manifest),patch('media_transport.get_text',return_value=manifest,side_effect=KeyboardInterrupt() if manifest is None else None):
+                with self.assertRaises(error) as failure:
+                    self.resolve_with_artwork(None,profile_overrides={'prefer_audio_rendition':True})
+                self.assertNotIn('PRIVATE',str(failure.exception))
+
     def test_rejects_lookalike_host(self):
         with self.assertRaisesRegex(RuntimeError,'unsupported-provider'):
             EmbeddedAdapter().resolve({'url':'https://portal.example.test.evil/x','title':'Aula'})
@@ -91,6 +116,7 @@ class EmbeddedTests(unittest.TestCase):
     def test_old_player_is_not_accepted_for_new_lesson(self):
         adapter=EmbeddedAdapter(timeout=1)
         adapter._last_media=('/content/OLD','/embed/old')
+        adapter.profile['prefer_audio_rendition']=True
         lesson={'url':'https://portal.example.test/content/NEW','title':'New'}
         page={'url':lesson['url'],'title':'New','ready':'complete','active':[{'path':'/content/NEW','title':'New'}],'iframes':['https://embed.example.test/embed/old?jwt=hidden']}
         with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html') as fetch, patch('embedded_adapter.time.monotonic',side_effect=[0,.1,.2,2]),patch('embedded_adapter.time.sleep'):

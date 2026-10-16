@@ -76,7 +76,11 @@ class EmbeddedAdapter(SafariAdapter):
                 payload=parse_next_data(self._iframe_html(src,lesson['url']),self.profile.get('script_id','__NEXT_DATA__'))
                 urls=[u for u in media_urls(payload,self.profile) if '.m3u8' in urlsplit(u).path.lower()]
                 if not urls:raise RuntimeError('missing-media-assets')
-                candidate=Candidate(urls[0],'hls-audio',referer=src,thumbnail_url=media_thumbnail(payload,self.profile));self._meta[candidate.url]={'referer':src};self._last_media=(wanted,urlsplit(src).path)
+                media=urls[0]
+                if self.profile.get('prefer_audio_rendition') is True:
+                    from media_transport import get_text,select_rendition
+                    media=select_rendition(media,get_text(media,src),audio_only=True) or media
+                candidate=Candidate(media,'hls-audio',referer=src,thumbnail_url=media_thumbnail(payload,self.profile));self._meta[candidate.url]={'referer':src};self._last_media=(wanted,urlsplit(src).path)
                 return [candidate]
             time.sleep(.5)
         raise RuntimeError('embedded-lesson-identity-timeout')
