@@ -75,6 +75,19 @@ raise SystemExit(2 if n==1 else 0)
    result=Supervisor(spec).dry_run();self.assertTrue(result['ok']);self.assertEqual(result['total'],1);launch.assert_not_called()
   self.assertFalse(Path(spec['root']).exists())
 
+ def test_launch_passes_configured_upload_timeout_to_worker(self):
+  self.set_engine('pass\n');self.write('delivery-journal.json',{})
+  spec={**self.spec,'upload_timeout':3600}
+  child=Mock();child.pid=12345;child.poll.return_value=None
+  with patch('queue_supervisor.preflight',return_value=[dict(state='pending')]),\
+       patch('queue_supervisor.subprocess.Popen',return_value=child) as launch,\
+       patch('queue_supervisor.awake',return_value=None):
+   Supervisor(spec).launch()
+  command=launch.call_args.args[0]
+  self.assertEqual(command[command.index('--upload-timeout')+1],'3600')
+  saved=json.loads((self.docs/'worker.json').read_text())
+  self.assertEqual(saved['upload_timeout'],3600)
+
  def test_duplicate_supervisor_does_not_overwrite_active_monitor(self):
   import fcntl
   self.write('resume-monitor-status.json',dict(phase='owner-active'))

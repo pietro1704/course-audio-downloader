@@ -51,6 +51,28 @@ class CourseContractsTests(unittest.TestCase):
             self.assertEqual(before,{str(p):p.read_bytes() for p in self.base.rglob('*') if p.is_file()})
             self.assertFalse(root.exists()); self.assertFalse(cloud.exists())
 
+    def test_upload_timeout_reaches_delivery_worker(self):
+        catalog, profile, _ = self.inputs('slow-cloud')
+        root, cloud = self.base/'slow-cloud-work', self.base/'slow-cloud-drive'
+        args = ['--catalog',str(catalog),'--profile',str(profile),'--root',str(root),
+                '--destination',str(cloud),'--icloud-python','python','--upload-timeout','3600']
+        with patch('course_cli.Delivery') as delivery, \
+             patch('course_cli.DocumentDelivery'), patch('course_cli.NativeCloud'), \
+             patch('course_cli.DocumentBrowser'), patch('course_cli.build_adapter'), \
+             contextlib.redirect_stdout(io.StringIO()):
+            delivery.return_value.journal = {}
+            delivery.return_value.completed_count.return_value = 0
+            self.assertEqual(main(args),0)
+        self.assertEqual(delivery.call_args.kwargs['upload_timeout'],3600)
+
+    def test_upload_timeout_rejects_nonpositive_nonfinite_and_over_bound_values(self):
+        catalog, profile, _ = self.inputs('bad-timeout')
+        args = ['--catalog',str(catalog),'--profile',str(profile),'--root',str(self.base/'work'),
+                '--destination',str(self.base/'cloud'),'--icloud-python','python','--dry-run']
+        for value in ['0','nan','21601']:
+            with self.subTest(value=value), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                main(args+['--upload-timeout',value])
+
     def test_identity_origin_and_unsafe_paths_rejected_before_media(self):
         catalog, profile, lesson = self.inputs('alpha')
         rules=load_profile(profile); lessons=load_lessons(catalog)
