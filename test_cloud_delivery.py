@@ -100,6 +100,18 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn(self.target(), self.cloud.evicted)
         self.assertGreater(receipt['freed_bytes'], 0)
 
+    def test_run_accepts_literal_colons_in_site_output_paths(self):
+        lesson = dict(self.lessons[0], title='Aula: 3',
+                      site_path=['Course', 'Módulo: Parte 1', 'Aula: 3'])
+        delivery = self.delivery()
+        target = self.cloud_root / 'Course' / 'Módulo: Parte 1' / 'Aula: 3.m4a'
+        called = []
+        delivery.process = lambda item, path, index=None: called.append((item, path, index))
+
+        delivery.run([(lesson, target)])
+
+        self.assertEqual(called, [(lesson, target, 0)])
+
     def test_pending_upload_preserves_sources_and_retry_does_not_reencode(self):
         delivery = self.delivery()
         self.cloud.ready = False
