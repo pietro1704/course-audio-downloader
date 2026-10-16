@@ -69,6 +69,27 @@ class ArtworkTests(unittest.TestCase):
         self.assertTrue(self.cover_bytes(result['final']))
         self.assertEqual(result['artwork']['origin'], 'video')
 
+    def test_embedded_json_resolver_artwork_reaches_real_conversion(self):
+        from test_profiles import ProfiledEmbeddedAdapter
+        plain=self.root/'plain-source.mp3'
+        self.ffmpeg('-i',str(self.source),'-map','0:a','-c','copy',str(plain))
+        lesson={'url':'https://portal.example.test/product/content/ABC','title':'Lesson'}
+        page={'url':lesson['url'],'title':lesson['title'],'ready':'complete','active':[{'path':'/product/content/ABC','title':lesson['title']}],'iframes':['https://embed.example.test/embed/clip']}
+        payload={'visual':{'cover':'https://cdn.test/artwork.jpg'},'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn.test/audio.m3u8'}]}}}}
+        class Response(io.BytesIO):
+            headers={}
+            def geturl(self):return 'https://cdn.test/artwork.jpg'
+        for embedded,source in [(False,plain),(True,self.source)]:
+            with self.subTest(embedded=embedded):
+                adapter=ProfiledEmbeddedAdapter(encoder='aac');adapter.profile['thumbnail_path']=['visual','cover']
+                def download(candidate,destination):shutil.copyfile(source,destination);return destination
+                with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">'+json.dumps(payload)+'</script>'),patch.object(adapter,'download',side_effect=download),patch('embedded_adapter.time.sleep'),patch('browser_adapter.urllib.request.urlopen',return_value=Response(self.cover.read_bytes())) as image:
+                    result=Pipeline(self.root/str(embedded),adapter,reserve_bytes=0).one(lesson)
+                self.assertEqual(result['status'],'ok',result)
+                self.assertEqual(result['artwork']['origin'],'embedded' if embedded else 'video')
+                self.assertTrue(self.cover_bytes(result['final']))
+                self.assertEqual(image.call_count,0 if embedded else 1)
+
     def test_original_cover_has_priority_without_any_thumbnail_request(self):
         with patch('browser_adapter.urllib.request.urlopen', side_effect=AssertionError('unneeded fetch')) as fetch:
             result = self.pipeline(thumbnail_url='https://cdn.test/other.jpg').one('https://test/lesson')
