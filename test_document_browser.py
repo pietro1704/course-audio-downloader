@@ -1,11 +1,16 @@
 """Execute document discovery and source guards in JavaScript, without a live account."""
 import json
+import itertools
 import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock,patch
 from document_browser import DocumentBrowser
 
 class DocumentBrowserTests(unittest.TestCase):
+    def setUp(self):
+        clock=Mock();clock.monotonic.side_effect=itertools.count(0,.1)
+        self.clock=patch('document_browser.time',clock);self.clock.start();self.addCleanup(self.clock.stop)
+
     def browser(self,origin='https://alpha.example.test'):
         p=dict(mode='direct',origin=origin,browser_target=dict(window_id=42,tab_index=7),
                identity_expressions={'lesson':'window.lessonId'},auth_expression='window.authenticated',
@@ -18,7 +23,7 @@ class DocumentBrowserTests(unittest.TestCase):
         env=dict(url=page['url'],title=page['title'],lessonId=10,authenticated=True)
         env.update(changed or {})
         js='const e='+json.dumps(env)+''';global.location={href:e.url};global.window={lessonId:e.lessonId,authenticated:e.authenticated,panelReady:false,files:[{id:'document-1',name:'Original.pdf',url:'https://assets.example.test/original.pdf'}]};global.MouseEvent=class{constructor(type){this.type=type}};global.document={title:e.title,querySelector:s=>s==='button'?{dispatchEvent:event=>{if(event.type==='mousedown')window.panelReady=true}}:null};let output;try{output={value:eval(SCRIPT),panelReady:window.panelReady}}catch(error){output={error:error.message,panelReady:window.panelReady}};process.stdout.write(JSON.stringify(output));'''.replace('SCRIPT',json.dumps(script))
-        r=subprocess.run(['node'],input=js,text=True,capture_output=True,timeout=5)
+        r=subprocess.run(['node'],input=js,text=True,capture_output=True,timeout=15)
         self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
     def test_two_unrelated_profiles_and_mousedown_panel(self):
         for origin in ['https://alpha.example.test','https://omega.example.test']:
@@ -53,6 +58,47 @@ class DocumentBrowserTests(unittest.TestCase):
         a,lesson,page=self.browser();a.profile['documents']={};a.profile['identity_expressions']={}
         def run(script):
             js='global.location={href:'+json.dumps(page['url'])+'};global.window={authenticated:true};global.document={title:"Lesson",querySelector:()=>null,querySelectorAll:()=>[{href:"https://assets.example.test/file.pdf",hasAttribute:()=>true,getAttribute:()=>"Original – File.pdf"}]};process.stdout.write('+script+');'
-            r=subprocess.run(['node'],input=js,text=True,capture_output=True,timeout=5);self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
+            r=subprocess.run(['node'],input=js,text=True,capture_output=True,timeout=15);self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
         with patch.object(a,'_eval',side_effect=[{},page,page]),patch.object(a,'_script',side_effect=run),patch('document_browser.time.sleep'):
             self.assertEqual(a.inventory(lesson)[0]['name'],'Original – File.pdf')
+
+    def test_explicit_ready_panel_does_not_wait_for_unrelated_frames(self):
+        a,lesson,page=self.browser();a.timeout=1;page['ready']='interactive'
+        def inspect(navigate=None,**kwargs):return {} if navigate else page
+        expected=[dict(id='document-1',name='Original.pdf',url='https://assets.example.test/original.pdf')]
+        with patch.object(a,'_eval',side_effect=inspect),patch.object(a,'_script',side_effect=[True,dict(ready=True,items=expected)]),patch('document_browser.time.sleep'):
+            self.assertEqual(a.inventory(lesson),expected)
+
+    def test_interactive_page_without_resource_readiness_cannot_claim_empty(self):
+        a,lesson,page=self.browser();a.timeout=1;page['ready']='interactive';a.profile['documents']={}
+        def inspect(navigate=None,**kwargs):return {} if navigate else page
+        with patch.object(a,'_eval',side_effect=inspect),patch.object(a,'_script') as script,patch('document_browser.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'page-identity-timeout'):a.inventory(lesson)
+            script.assert_not_called()
+
+    def test_explicit_not_ready_panel_never_reports_empty_success(self):
+        a,lesson,page=self.browser();a.timeout=1;page['ready']='interactive'
+        def inspect(navigate=None,**kwargs):return {} if navigate else page
+        def panel(script):return dict(ready=False,items=[]) if 'items:' in script else True
+        with patch.object(a,'_eval',side_effect=inspect),patch.object(a,'_script',side_effect=panel),patch('document_browser.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'document-inventory-timeout'):a.inventory(lesson)
+
+    def test_panel_has_its_own_wait_after_slow_source_verification(self):
+        a,lesson,page=self.browser();a.timeout=1
+        def inspect(navigate=None,**kwargs):return {} if navigate else page
+        with patch.object(a,'_eval',side_effect=inspect),patch.object(a,'_script',side_effect=[True,dict(ready=True,items=[])]),patch('document_browser.time.sleep'),patch('document_browser.time.monotonic',side_effect=[0,.5,.9,1.1,1.2]):
+            self.assertEqual(a.inventory(lesson),[])
+
+    def test_transient_loading_inspection_failure_is_retried_before_binding(self):
+        a,lesson,page=self.browser()
+        with patch.object(a,'_eval',side_effect=[{},ValueError('empty loading response'),page,page]),patch.object(a,'_script',side_effect=[True,dict(ready=True,items=[])]),patch('document_browser.time.sleep'):
+            self.assertEqual(a.inventory(lesson),[])
+
+    def test_permanently_unavailable_source_never_executes_panel(self):
+        a,lesson,page=self.browser();a.timeout=1
+        def inspect(navigate=None,**kwargs):
+            if navigate:return {}
+            raise ValueError('empty loading response')
+        with patch.object(a,'_eval',side_effect=inspect),patch.object(a,'_script') as script,patch('document_browser.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'page-identity-timeout'):a.inventory(lesson)
+            script.assert_not_called()
