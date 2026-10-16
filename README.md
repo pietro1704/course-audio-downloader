@@ -19,6 +19,14 @@ Catalogues use `course-catalog/v1`, complete counts and lesson `title`, `url`, `
 
 Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedded-json`, `template-hls` or `extractor`. Selectors, title suffixes, identity expressions, player patterns and URL templates belong to the local profile. Treat profiles as trusted local code: identity expressions execute read-only JavaScript in Safari. Examples and contracts are documented in [docs/template-profile.md](docs/template-profile.md).
 
+If a provider publishes equivalent route prefixes, a profile may declare
+`"url_path_prefix_aliases": {"/en-GB/": "/en-gb/"}`. Browser audio resolution and
+document discovery normalize only these explicit prefixes when comparing the
+current, requested and canonical page URLs. Origins and the rest of each path,
+including case-sensitive lesson IDs, must still match. Default comparisons stay
+strict. Catalogue URLs, persisted identities and raw document page guards stay
+unchanged; this option does not rewrite stored receipts or bypass page checks.
+
 The bounded pipeline supports 1–8 lessons concurrently, with browser resolution serialized. Audio is AAC-LC mono, 44100 Hz, target 32 kbps. Original attached artwork takes priority; absent artwork falls back to the matching video thumbnail, then allows audio without a cover. Validate actual throughput before increasing concurrency further.
 
 Delivery uses `Documentacao/delivery.lock`, `delivery-journal.json`, `delivery-status.json` and `pipeline-manifest.jsonl`. A verified native iCloud upload is required before deleting the matching original and evicting the local cloud cache. Prepared receipts resume without another download. A completed no-cover receipt does not repeat its prior optional artwork lookup on restart; use `--refresh-completed-artwork` explicitly to retry missing covers. First-pass embedded artwork and matching-video fallback always run during conversion. Cancellation drains submitted tasks and preserves sources. See [delivery details](docs/sequential-icloud.md).

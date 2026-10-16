@@ -8,7 +8,7 @@ import urllib.request
 from dataclasses import replace
 from urllib.parse import urlsplit
 from pipeline import Candidate
-from site_profile import inspection_script, identity_matches, navigation_script
+from site_profile import inspection_script, identity_matches, navigation_script, normalized_url_path
 
 
 def normalize_title(value, suffix_pattern=None):
@@ -17,9 +17,10 @@ def normalize_title(value, suffix_pattern=None):
     return value.casefold()
 
 
-def canonical(value):
+def canonical(value, profile=None):
     p = urlsplit(value)
-    return p.netloc.lower(), p.path.rstrip('/')
+    path = normalized_url_path(p.path, profile) if profile else p.path
+    return p.netloc.lower(), path.rstrip('/')
 
 
 class SafariAdapter:
@@ -132,8 +133,8 @@ end tell'''
                     previous,stable=None,0;time.sleep(.5);continue
                 if urlsplit(page.get('url','')).path in self.profile.get('login_paths',[]): raise RuntimeError('login-required')
                 title=self._title(page.get('title',''));candidates=self.candidates(page,self.profile)
-                exact=canonical(page.get('url',''))==canonical(lesson['url'])
-                canon=not page.get('canonical') or canonical(page['canonical'])==canonical(lesson['url'])
+                exact=canonical(page.get('url',''),self.profile)==canonical(lesson['url'],self.profile)
+                canon=not page.get('canonical') or canonical(page['canonical'],self.profile)==canonical(lesson['url'],self.profile)
                 interactive=(page.get('ready')=='interactive' and titles and exact and canon and
                              len(candidates)==1 and candidates[0].kind=='mp3')
                 active=not self.profile.get('active_selector') or any(self._title(x)==self._title(lesson.get('title','')) for x in page.get('titles',[]))
