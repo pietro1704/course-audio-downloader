@@ -1,6 +1,6 @@
 # Downloader independente de curso
 
-Status: code verified; runtime migration and CI pending
+Status: verified
 
 ## Resultado solicitado
 Remover nomes de cursos/provedores de módulos, arquivos internos e lógica. Regras de navegação e mídia devem vir de perfil/configuração e catálogo, sem mudar código para outro curso. Preservar títulos e organização dos áudios como dados literais do site. Testar dry run antes de continuar o catálogo integral pendente.
@@ -22,4 +22,10 @@ Spec: 150 testes passaram em 52,131 s. Os casos de schema desconhecido e symlink
 
 Correção do gate existente: a checagem de higiene anterior rejeitava o exemplo público de configuração e podia mascarar falhas do grep. Agora permite somente esse exemplo e propaga erro/match do scan; caso real e índice Git alternativo com configuração privada foram exercitados.
 
-Sem findings de código pendentes. Migração final do diretório de execução depende da drenagem do worker validado; não é bloqueio para o PR. CI e retomada real com oito aulas ainda devem ser registrados. Não marcar a goal integral como concluída antes da entrega e auditoria de todas as aulas.
+Sem findings de código pendentes. Migração final do diretório de execução depende da drenagem do worker validado; não é bloqueio para o PR. CI aprovado nas execuções de push e PR; retomada real com oito aulas simultâneas verificada. Não marcar a goal integral como concluída antes da entrega e auditoria de todas as aulas.
+
+
+## Verificação final
+Catálogo integral: 67/67 entregas nativas confirmadas, 67 caminhos exatos, 67 hashes de fonte distintos e capas de vídeo em todos os áudios. Preset conferido em todos os recibos; nenhum original ou áudio convertido restante no diretório de trabalho. Os dois menus do site foram reconciliados novamente: 134 links, 67 identidades/títulos únicos, nenhuma falta ou sobra. Recibos e manifests dos lotes independentes consolidados depois da saída dos workers; diretórios históricos arquivados. Parciais antigos (162.267.268 bytes) removidos somente após confirmação nativa, hash inalterado e vínculo ao caminho de staging da aula correta.
+
+Instalação local atualizada pelo wheel, com backup anterior externo. Os doze módulos instalados conferem byte a byte com o worktree; comandos e módulos antigos removidos. Dry run da instalação, executado fora do repositório, passou nas 67 aulas: 67 completas e zero pendentes/preparadas. Todos os workers e seus keep-awakes terminaram. O monitor encerrou, e a auditoria final está nos dados privados do diretório de execução. Gate local: 150 testes; CI de push e PR aprovado. Esta alteração final registra evidências e não muda código executável.
