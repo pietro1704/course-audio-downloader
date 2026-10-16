@@ -116,6 +116,7 @@ class EmbeddedTests(unittest.TestCase):
     def test_old_player_is_not_accepted_for_new_lesson(self):
         adapter=EmbeddedAdapter(timeout=1)
         adapter._last_media=('/content/OLD','/embed/old')
+        adapter.profile['navigation_mode']='matching-link'
         adapter.profile['prefer_audio_rendition']=True
         lesson={'url':'https://portal.example.test/content/NEW','title':'New'}
         page={'url':lesson['url'],'title':'New','ready':'complete','active':[{'path':'/content/NEW','title':'New'}],'iframes':['https://embed.example.test/embed/old?jwt=hidden']}
