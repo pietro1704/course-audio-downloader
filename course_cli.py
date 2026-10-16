@@ -80,6 +80,8 @@ def main(argv=None):
     p.add_argument('--limit',type=int);p.add_argument('--start',type=int,default=0)
     p.add_argument('--min-free-gib',type=float,default=4)
     p.add_argument('--dry-run',action='store_true');p.add_argument('--probe',type=int,default=0)
+    p.add_argument('--refresh-completed-artwork',action='store_true',
+                   help='Explicitly retry missing covers on completed native uploads before delivery')
     args=p.parse_args(argv)
     if args.start<0 or (args.limit is not None and args.limit<1) or args.min_free_gib<4 or args.probe<0:
         p.error('invalid numeric boundary')
@@ -117,7 +119,8 @@ def main(argv=None):
         try:
             for lesson,target in work:
                 receipt=delivery.journal.get(Pipeline.identity(lesson['url']),{})
-                if receipt.get('state')=='complete' and receipt.get('artwork',{}).get('origin')=='none':
+                if (args.refresh_completed_artwork and receipt.get('state')=='complete'
+                        and receipt.get('artwork',{}).get('origin')=='none'):
                     delivery.refresh_completed_artwork(lesson,target)
             progress.event('running');delivery.run(work,start_index=args.start)
             progress.event('finished',delivered=delivery.completed_count());return 0
