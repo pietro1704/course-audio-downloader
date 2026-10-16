@@ -1,5 +1,6 @@
 """Source-bound document discovery driven entirely by trusted site profiles."""
 import json
+import subprocess
 import time
 from urllib.parse import urlsplit
 from browser_adapter import SafariAdapter, canonical
@@ -19,16 +20,21 @@ class DocumentBrowser(SafariAdapter):
 
     def _matches(self,page,lesson):
         titles={self._title(lesson[k]) for k in ('title','page_title','provider_title') if lesson.get(k)}
+        ready_states={'complete','interactive'} if self.profile.get('documents',{}).get('ready_expression') else {'complete'}
         return (canonical(page.get('url',''))==canonical(lesson['url']) and
                 (not page.get('canonical') or canonical(page['canonical'])==canonical(lesson['url'])) and
-                page.get('auth') and page.get('ready')=='complete' and
+                page.get('auth') and page.get('ready') in ready_states and
                 self._title(page.get('title','')) in titles and identity_matches(page,lesson,self.profile))
 
     def inventory(self,lesson):
         self._check_url(lesson['url']);self._eval(lesson['url'])
         deadline=time.monotonic()+self.timeout;stable=0
         while time.monotonic()<deadline:
-            page=self._eval()
+            try:
+                page=self._eval()
+                if not isinstance(page,dict):raise ValueError('invalid-document-page')
+            except (RuntimeError,ValueError,subprocess.TimeoutExpired):
+                stable=0;time.sleep(.5);continue
             if urlsplit(page.get('url','')).path in self.profile.get('login_paths',[]):raise RuntimeError('login-required')
             stable=stable+1 if self._matches(page,lesson) else 0
             if stable>=2:break
@@ -50,6 +56,7 @@ class DocumentBrowser(SafariAdapter):
         panel=contract.get('panel_script','')
         if panel:self._script('(()=>{'+guard+panel+';return JSON.stringify(true)})()')
         ready=contract.get('ready_expression','true')
+        deadline=time.monotonic()+self.timeout
         while time.monotonic()<deadline:
             result=self._script('(()=>{'+guard+'return JSON.stringify({ready:!!('+ready+'),items:('+items+')})})()')
             if result['ready']:

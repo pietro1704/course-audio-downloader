@@ -1,4 +1,5 @@
 import json
+import itertools
 import tempfile
 import unittest
 import subprocess
@@ -47,7 +48,7 @@ class EmbeddedTests(unittest.TestCase):
         payload={'visual':{'cover':image},'visuals':[{}, {'cover':image}],'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn.test/audio.m3u8?token=PRIVATE'}]}}}}
         page={'url':lesson['url'],'title':'Aula','ready':'complete','active':[{'path':'/product/content/ABC','title':'Aula'}],'iframes':['https://embed.example.test/embed/clip']}
         page.update(overrides)
-        with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">'+json.dumps(payload)+'</script>') as fetch,patch('embedded_adapter.time.sleep'):
+        with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">'+json.dumps(payload)+'</script>') as fetch,patch('embedded_adapter.time.sleep'),patch('embedded_adapter.time.monotonic',side_effect=itertools.count(0,.01)):
             result=adapter.resolve(lesson)
         fetch.assert_called_once()
         return result[0]
