@@ -4,9 +4,10 @@ import unittest
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
-from hotmart_cli import parse_next_data, media_urls, load_lessons, HotmartAdapter, Candidate
+from embedded_adapter import parse_next_data, media_urls, load_lessons, Candidate
+from test_profiles import ProfiledEmbeddedAdapter as EmbeddedAdapter
 
-class HotmartTests(unittest.TestCase):
+class EmbeddedTests(unittest.TestCase):
     def test_parse(self):
         data={'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn/x.m3u8'}]}}}}
         self.assertEqual(media_urls(parse_next_data('<script id="__NEXT_DATA__">'+json.dumps(data)+'</script>')),['https://cdn/x.m3u8'])
@@ -23,24 +24,24 @@ class HotmartTests(unittest.TestCase):
     def test_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'c.json'
-            p.write_text(json.dumps({'modules':[{'order':8,'title':'Módulo','lessons':[{'number':1,'title':'Aula','url':'https://hotmart.com/x'}]}]}))
+            p.write_text(json.dumps({'modules':[{'order':8,'title':'Módulo','lessons':[{'number':1,'title':'Aula','url':'https://portal.example.test/x'}]}]}))
             got=load_lessons(p)
             self.assertEqual(got[0]['title'],'Aula')
-            self.assertTrue(got[0]['stem'].startswith('08-001-'))
+            self.assertEqual(got[0]['site_path'], ['Módulo', 'Aula'])
 
     def test_waits_without_repeated_navigation(self):
-        lesson={'url':'https://hotmart.com/product/content/ABC','title':'Aula'}
-        adapter=HotmartAdapter(timeout=1)
-        good={'url':lesson['url'],'title':'Aula','ready':'complete','active':[{'path':'/product/content/ABC','title':'Aula'}],'iframes':['https://cf-embed.play.hotmart.com/embed/vid?jwt=ROTATING']}
+        lesson={'url':'https://portal.example.test/product/content/ABC','title':'Aula'}
+        adapter=EmbeddedAdapter(timeout=1)
+        good={'url':lesson['url'],'title':'Aula','ready':'complete','active':[{'path':'/product/content/ABC','title':'Aula'}],'iframes':['https://embed.example.test/embed/vid?jwt=ROTATING']}
         stale=dict(good,title='Previous')
-        with patch.object(adapter,'_eval_hotmart',side_effect=[stale,stale,good,good,good]) as ev, patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">{"props":{"pageProps":{"applicationData":{"mediaAssets":[{"url":"https://cdn/x.m3u8?token=SECRET"}]}}}}</script>'), patch('hotmart_cli.time.sleep'):
+        with patch.object(adapter,'_eval_embedded',side_effect=[stale,stale,good,good,good]) as ev, patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">{"props":{"pageProps":{"applicationData":{"mediaAssets":[{"url":"https://cdn/x.m3u8?token=SECRET"}]}}}}</script>'), patch('embedded_adapter.time.sleep'):
             result=adapter.resolve(lesson)
         self.assertEqual(result[0].kind,'hls-audio')
         self.assertEqual(sum(bool(c.args) for c in ev.call_args_list),1)
 
     def test_rejects_lookalike_host(self):
         with self.assertRaisesRegex(RuntimeError,'unsupported-provider'):
-            HotmartAdapter().resolve({'url':'https://hotmart.com.evil/x','title':'Aula'})
+            EmbeddedAdapter().resolve({'url':'https://portal.example.test.evil/x','title':'Aula'})
 
     def test_ignores_unrelated_media_assets(self):
         self.assertEqual(media_urls({'mediaAssets':[{'url':'https://wrong/x.m3u8'}]}),[])
@@ -50,12 +51,12 @@ class HotmartTests(unittest.TestCase):
             media_urls({'props':{'pageProps':{'applicationData':{'isDrmEnabled':True}}}})
 
     def test_old_player_is_not_accepted_for_new_lesson(self):
-        adapter=HotmartAdapter(timeout=1)
+        adapter=EmbeddedAdapter(timeout=1)
         adapter._last_media=('/content/OLD','/embed/old')
-        lesson={'url':'https://hotmart.com/content/NEW','title':'New'}
-        page={'url':lesson['url'],'title':'New','ready':'complete','active':[{'path':'/content/NEW','title':'New'}],'iframes':['https://cf-embed.play.hotmart.com/embed/old?jwt=hidden']}
-        with patch.object(adapter,'_eval_hotmart',return_value=page),patch.object(adapter,'_iframe_html') as fetch, patch('hotmart_cli.time.monotonic',side_effect=[0,.1,.2,2]),patch('hotmart_cli.time.sleep'):
-            with self.assertRaisesRegex(RuntimeError,'hotmart-lesson-identity-timeout'):
+        lesson={'url':'https://portal.example.test/content/NEW','title':'New'}
+        page={'url':lesson['url'],'title':'New','ready':'complete','active':[{'path':'/content/NEW','title':'New'}],'iframes':['https://embed.example.test/embed/old?jwt=hidden']}
+        with patch.object(adapter,'_eval_embedded',return_value=page),patch.object(adapter,'_iframe_html') as fetch, patch('embedded_adapter.time.monotonic',side_effect=[0,.1,.2,2]),patch('embedded_adapter.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'embedded-lesson-identity-timeout'):
                 adapter.resolve(lesson)
         fetch.assert_not_called()
 
@@ -72,8 +73,8 @@ class HotmartTests(unittest.TestCase):
             self.assertEqual(cmd[cmd.index('-map')+1],'0:a:0')
             self.assertEqual(cmd[cmd.index('-fs')+1],str(max_bytes))
             return subprocess.CompletedProcess(cmd,ffmpeg_code,b'',b'')
-        with patch('hotmart_cli.subprocess.run',side_effect=run),patch('hotmart_cli.audio._probe_duration',return_value=local):
-            return HotmartAdapter(max_source_bytes=max_bytes).download(candidate,dest)
+        with patch('embedded_adapter.subprocess.run',side_effect=run),patch('embedded_adapter.audio._probe_duration',return_value=local):
+            return EmbeddedAdapter(max_source_bytes=max_bytes).download(candidate,dest)
 
     def test_original_download_is_stream_copy_with_size_cap(self):
         self.assertEqual(self._download().read_bytes(),b'original stream bytes')

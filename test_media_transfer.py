@@ -6,7 +6,7 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
-import ppr_bunny
+import media_transport
 from pipeline import Candidate
 
 
@@ -31,11 +31,11 @@ class FakeResponse:
         return 200
 
 
-class BunnyTransferTests(unittest.TestCase):
+class MediaTransferTests(unittest.TestCase):
     def test_plain_segments_rejects_signed_non_https_url_without_fetching(self):
         playlist = "#EXTM3U\n#EXTINF:1,\nhttp://cdn.example/seg.ts?token=secret\n#EXT-X-ENDLIST"
         with self.assertRaisesRegex(RuntimeError, "unsafe-player-media-url"):
-            ppr_bunny.plain_segments(
+            media_transport.plain_segments(
                 "https://cdn.example/master.m3u8?sig=secret", playlist
             )
 
@@ -51,7 +51,7 @@ class BunnyTransferTests(unittest.TestCase):
             ]
         )
         self.assertEqual(
-            ppr_bunny.plain_segments(
+            media_transport.plain_segments(
                 "https://cdn.example/master.m3u8?sig=master", playlist
             ),
             (
@@ -70,7 +70,7 @@ class BunnyTransferTests(unittest.TestCase):
             return_value=FakeResponse(io.BytesIO(oversized)),
         ):
             with self.assertRaisesRegex(RuntimeError, "player-segment-size-budget"):
-                ppr_bunny.read_fragment(
+                media_transport.read_fragment(
                     "https://cdn.example/too-large.ts", "https://example.test/lesson"
                 )
 
@@ -107,12 +107,12 @@ class BunnyTransferTests(unittest.TestCase):
                     self.returncode = -9
 
             process = FakeProcess()
-            with patch("ppr_bunny.get_text", return_value=playlist), patch(
+            with patch("media_transport.get_text", return_value=playlist), patch(
                 "urllib.request.urlopen", side_effect=open_fragment
             ), patch("subprocess.Popen", return_value=process), patch(
                 "course_audio_bot._probe_duration", return_value=2.0
             ):
-                result = ppr_bunny.copy_hls_audio(
+                result = media_transport.copy_hls_audio(
                     Candidate("https://cdn.example/master.m3u8", "hls-audio"),
                     destination,
                     1024,
@@ -134,13 +134,13 @@ class BunnyTransferTests(unittest.TestCase):
                 destination.write_bytes(b"complete-but-short-source")
                 return 0
             process.wait.side_effect = finish
-            with patch("ppr_bunny.get_text", return_value=playlist), patch(
-                "ppr_bunny.read_fragment", return_value=b"ts-fragment"
+            with patch("media_transport.get_text", return_value=playlist), patch(
+                "media_transport.read_fragment", return_value=b"ts-fragment"
             ), patch("subprocess.Popen", return_value=process), patch(
                 "course_audio_bot._probe_duration", return_value=1.0
             ) as probe:
                 with self.assertRaisesRegex(RuntimeError, "player-audio-download-failed"):
-                    ppr_bunny.copy_hls_audio(
+                    media_transport.copy_hls_audio(
                         Candidate("https://cdn.example/master.m3u8?token=PRIVATE", "hls-audio"),
                         destination, 100000, "https://example.test/lesson",
                     )
@@ -152,7 +152,7 @@ class BunnyTransferTests(unittest.TestCase):
         url='https://cdn.example/seg.ts?token=PRIVATE'
         with patch('urllib.request.urlopen',side_effect=HTTPError(url,403,'expired',{},None)) as opener:
             with self.assertRaisesRegex(RuntimeError,'^player-segment-fetch-failed$') as failure:
-                ppr_bunny.read_fragment(url,'https://example.test/player')
+                media_transport.read_fragment(url,'https://example.test/player')
             self.assertNotIn('PRIVATE',str(failure.exception))
             self.assertEqual(opener.call_count,3)
 
@@ -166,11 +166,11 @@ class BunnyTransferTests(unittest.TestCase):
                 raise BrokenPipeError('PRIVATE')
         process=MagicMock();process.stdin=BadPipe();process.poll.return_value=None
         playlist='#EXTM3U\n#EXTINF:1,\none.ts\n#EXT-X-ENDLIST'
-        with tempfile.TemporaryDirectory() as td, patch('ppr_bunny.get_text',return_value=playlist), patch(
-            'ppr_bunny.read_fragment',return_value=b'TS'
+        with tempfile.TemporaryDirectory() as td, patch('media_transport.get_text',return_value=playlist), patch(
+            'media_transport.read_fragment',return_value=b'TS'
         ), patch('subprocess.Popen',return_value=process):
             with self.assertRaisesRegex(RuntimeError,'^player-audio-download-failed$'):
-                ppr_bunny.copy_hls_audio(Candidate('https://cdn.example/index.m3u8','hls-audio'),Path(td)/'out.m4a',1024,'https://example.test/player')
+                media_transport.copy_hls_audio(Candidate('https://cdn.example/index.m3u8','hls-audio'),Path(td)/'out.m4a',1024,'https://example.test/player')
             process.kill.assert_called_once()
 
     def test_real_ffmpeg_pipe_remuxes_synthetic_ts_with_mocked_http(self):
@@ -185,10 +185,10 @@ class BunnyTransferTests(unittest.TestCase):
             )
             body = source.read_bytes()
             playlist = "#EXTM3U\n#EXTINF:1,\none.ts\n#EXT-X-ENDLIST"
-            with patch("ppr_bunny.get_text", return_value=playlist), patch(
+            with patch("media_transport.get_text", return_value=playlist), patch(
                 "urllib.request.urlopen", return_value=FakeResponse(io.BytesIO(body), content_length=len(body))
             ):
-                result = ppr_bunny.copy_hls_audio(
+                result = media_transport.copy_hls_audio(
                     Candidate("https://cdn.example/master.m3u8", "hls-audio"),
                     destination, 1_000_000, "https://example.test/lesson",
                 )

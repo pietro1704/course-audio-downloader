@@ -8,10 +8,11 @@ import threading
 import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 import course_audio_bot as audio
+import artwork
 
 PRESET = {"codec": "aac", "profile": "LC", "channels": 1, "sample_rate": 44100, "bitrate": 32000}
 
@@ -20,12 +21,15 @@ class Candidate:
     url: str
     kind: str
     size: int | None = None
+    thumbnail_url: str | None = field(default=None, repr=False, compare=False)
+    player_url: str | None = field(default=None, repr=False, compare=False)
+    referer: str | None = field(default=None, repr=False, compare=False)
 
 class Pipeline:
     def __init__(self, root, adapter, concurrency=2, reserve_bytes=4*1024**3,
                  task_budget_bytes=128*1024**2):
-        if not 1 <= concurrency <= 4:
-            raise ValueError("concurrency must be between 1 and 4")
+        if not 1 <= concurrency <= 8:
+            raise ValueError("concurrency must be between 1 and 8")
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.adapter = adapter
@@ -86,6 +90,15 @@ class Pipeline:
         return {'url': value} if isinstance(value, str) else dict(value)
 
     def _paths(self, lesson, ident):
+        if 'site_path' in lesson:
+            parts = lesson['site_path']
+            # Preserve the site's spelling; unsafe names require an explicit
+            # decision instead of silently renaming or escaping the root.
+            if (not isinstance(parts, list) or len(parts) < 2 or
+                    any(not isinstance(p, str) or not p or p in {'.', '..'} or
+                        any(c in p for c in '/\\\x00:') for p in parts)):
+                raise ValueError('invalid-site-path')
+            return self.root.joinpath(*parts[:-1]), parts[-1]
         folder = self.root
         if lesson.get('course_title'):
             folder /= audio.slugify(lesson['course_title'])
@@ -187,6 +200,7 @@ class Pipeline:
             encoded = work / 'encoded.m4a'
             t = time.monotonic()
             self.adapter.encode(original, encoded)
+            cover = artwork.apply(original, encoded, candidate, self.adapter, work)
             timings['encode'] = time.monotonic() - t
             t = time.monotonic()
             valid, _ = audio.verify_audio_output(encoded, source=original)
@@ -208,7 +222,8 @@ class Pipeline:
                       'source_hash': source_hash, 'final_hash': final_hash,
                       'media_identity': self.identity(candidate.url), 'params': PRESET,
                       'provider_identity_verified': True, 'validation_version': 2,
-                      'timings': timings}
+                      'artwork': cover,
+                      'timings': timings, 'duration_seconds': duration}
             self.write(record)
             shutil.rmtree(work)
             return record

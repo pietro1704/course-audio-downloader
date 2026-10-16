@@ -28,7 +28,7 @@ URL_RE = re.compile(r"https?://[^\s'\"<>\\]+", re.I)
 SRC_RE = re.compile(r"(?:src|href|content|data-[\w-]+)=[\"']([^\"']+)[\"']", re.I)
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 HREF_RE = re.compile(r"href=[\"']([^\"'#]+)[\"']", re.I)
-PANDA_EMBED_RE = re.compile(r"https?://player-([a-z0-9-]+)\.tv\.pandavideo\.com\.br/embed/[^\"'<>\s]*?[?&]v=([0-9a-f-]{20,})", re.I)
+
 
 
 @dataclass
@@ -132,18 +132,18 @@ def is_media_like_url(url: str) -> bool:
 
 def media_candidates(html: str, base_url: str) -> list[str]:
     found: list[str] = []
-    # Panda Video embeds expose a normal HLS playlist derived from library id + video id.
-    for lib, video_id in PANDA_EMBED_RE.findall(html):
-        found.append(f"https://b-{lib}.tv.pandavideo.com.br/{video_id}/playlist.m3u8")
+    for raw in re.findall(r'<iframe[^>]+src=["\']([^"\']+)', html, re.I):
+        url = urllib.parse.urljoin(base_url, raw)
+        if urllib.parse.urlsplit(url).scheme == 'https': found.append(url)
     for raw in URL_RE.findall(html):
         url = clean_media_url(raw)
-        if "player.mediadelivery.net/embed/" in url or "tv.pandavideo.com.br/embed/" in url:
+        if "/embed/" in urllib.parse.urlsplit(url).path:
             found.append(url)
         elif is_media_like_url(url):
             found.append(url)
     for raw in SRC_RE.findall(html):
         url = urllib.parse.urljoin(base_url, raw.replace("\\/", "/"))
-        if "player.mediadelivery.net/embed/" in url or "tv.pandavideo.com.br/embed/" in url:
+        if "/embed/" in urllib.parse.urlsplit(url).path:
             found.append(clean_media_url(url))
         elif is_media_like_url(url):
             found.append(clean_media_url(url))
@@ -154,7 +154,7 @@ def media_candidates(html: str, base_url: str) -> list[str]:
         if url not in seen:
             seen.add(url)
             out.append(url)
-    out.sort(key=lambda u: 1 if ("player.mediadelivery.net/embed/" in u or "tv.pandavideo.com.br/embed/" in u) else 0)
+    out.sort(key=lambda u: 0 if is_media_like_url(u) else 1)
     return out
 
 
@@ -209,6 +209,23 @@ def _probe_duration(path: Path) -> float | None:
     except ValueError:
         return None
 
+def _decoded_audio_duration(path: Path) -> float | None:
+    # Header estimates can be wrong for MP3 without a trustworthy VBR index.
+    # Decode every audio frame and count samples instead of widening tolerance.
+    rc, out = run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+                   "stream=sample_rate:frame=nb_samples", "-of", "json", str(path)])
+    if rc != 0:
+        return None
+    try:
+        data = json.loads(out)
+        rate = int(data['streams'][0]['sample_rate'])
+        samples = [int(frame['nb_samples']) for frame in data['frames']]
+        if rate <= 0 or not samples or any(count <= 0 for count in samples):
+            return None
+        return sum(samples) / rate
+    except (ValueError, TypeError, KeyError, IndexError):
+        return None
+
 def verify_audio_output(path: Path, source: Path | None = None) -> tuple[bool, str]:
     if not path.exists() or path.stat().st_size == 0:
         return False, "arquivo ausente/vazio"
@@ -225,8 +242,14 @@ def verify_audio_output(path: Path, source: Path | None = None) -> tuple[bool, s
     if duration is None or duration <= 0: return False, "duração inválida"
     if source is not None:
         source_duration = _probe_duration(source)
-        if source_duration is None or abs(duration-source_duration) > max(0.25, min(2.0, source_duration*0.02)):
+        if source_duration is None:
             return False, f"duração divergente: fonte={source_duration} saída={duration}"
+        if abs(duration-source_duration) > max(0.25, min(2.0, source_duration*0.02)):
+            decoded_source = _decoded_audio_duration(source)
+            decoded_output = _decoded_audio_duration(path)
+            if (decoded_source is None or decoded_output is None
+                    or abs(decoded_output-decoded_source) > max(0.25, min(2.0, decoded_source*0.02))):
+                return False, f"duração divergente: fonte={source_duration} saída={duration}"
     rc, _ = run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "null", "-"])
     return (rc == 0, "ok" if rc == 0 else "decode falhou")
 
@@ -301,7 +324,7 @@ def infer_suffix_from_url(url: str) -> str:
 
 def direct_download(url: str, out_dir: Path, stem: str, cookies_file: Path | None, referer: str | None = None, output_format: str = "m4a") -> tuple[bool,str]:
     suffix=infer_suffix_from_url(url)
-    if suffix in STREAM_EXTS or suffix in VIDEO_EXTS or "player.mediadelivery.net/embed/" in url or "pandavideo" in url:
+    if suffix in STREAM_EXTS or suffix in VIDEO_EXTS or "/embed/" in urllib.parse.urlsplit(url).path:
         return ytdlp_download(url,out_dir,stem,cookies_file,referer,output_format)
     desired=out_dir/(slugify(stem)+f".{output_format}")
     if desired.exists() and desired.stat().st_size>0:

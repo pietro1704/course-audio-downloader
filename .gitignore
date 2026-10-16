@@ -9,10 +9,10 @@ Secrets/
 
 # User-specific automation/inventory/output
 apple_complete_pipeline.py
-generate_ppr_all_config.py
+generate_*_config.py
 run_complete_courses.sh
-ppr*_inventory*.tsv
-ppr-all-courses-inventory.txt
+*_inventory*.tsv
+*-courses-inventory.txt
 apple_pipeline_report.txt
 logs/
 *.log

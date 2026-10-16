@@ -29,10 +29,10 @@ class TestHelpers(unittest.TestCase):
         self.assertIn(signed, bot.media_candidates(html, 'https://course.example/aulas/1'))
         self.assertEqual(bot.infer_suffix_from_url(signed), '.mp3')
 
-    def test_panda_embed_to_hls(self):
-        html = '<iframe src="https://player-vz-abc123.tv.pandavideo.com.br/embed/?v=0bb68d92-e0f4-4bdd-bbb2-65aaf83a29d8&color=fff"></iframe>'
-        urls = bot.media_candidates(html, 'https://course.example/aulas/1')
-        self.assertIn('https://b-vz-abc123.tv.pandavideo.com.br/0bb68d92-e0f4-4bdd-bbb2-65aaf83a29d8/playlist.m3u8', urls)
+    def test_generic_embed_is_preserved_without_inventing_media_url(self):
+        frame = 'https://player.example.test/embed/video-1'
+        urls = bot.media_candidates(f'<iframe src="{frame}"></iframe>', 'https://course.example/lesson/1')
+        self.assertEqual(urls, [frame])
 
     def test_page_links_same_site_course_paths_only(self):
         html = '''
@@ -119,6 +119,52 @@ class TestDownload(unittest.TestCase):
 
 
 class TestRegressionMedia(unittest.TestCase):
+    def variable_bitrate_fixture(self, root):
+        parts = []
+        for index, bitrate in enumerate(['64k', '192k']):
+            part = root / f'part-{index}.mp3'
+            rc, detail = bot.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                                 'sine=frequency=440:duration=2', '-c:a', 'libmp3lame',
+                                 '-b:a', bitrate, '-write_xing', '0', '-id3v2_version', '0', str(part)])
+            self.assertEqual(rc, 0, detail)
+            parts.append(part.read_bytes())
+        source, output = root / 'source.mp3', root / 'output.m4a'
+        source.write_bytes(b''.join(parts))
+        rc, detail = bot.run(['ffmpeg', '-v', 'error', '-i', str(source), '-ac', '1',
+                             '-ar', '44100', '-c:a', 'aac', '-b:a', '32k', str(output)])
+        self.assertEqual(rc, 0, detail)
+        return source, output
+
+    def test_estimated_mp3_duration_uses_decoded_audio_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            source, output = self.variable_bitrate_fixture(Path(td))
+            self.assertGreater(abs(bot._probe_duration(source) - bot._probe_duration(output)), 2)
+            valid, detail = bot.verify_audio_output(output, source)
+            self.assertTrue(valid, detail)
+
+    def test_estimated_duration_does_not_accept_truncated_audio(self):
+        with tempfile.TemporaryDirectory() as td:
+            source, _ = self.variable_bitrate_fixture(Path(td))
+            truncated = Path(td) / 'truncated.m4a'
+            rc, detail = bot.run(['ffmpeg', '-v', 'error', '-i', str(source), '-t', '1',
+                                 '-ac', '1', '-ar', '44100', '-c:a', 'aac', '-b:a', '32k', str(truncated)])
+            self.assertEqual(rc, 0, detail)
+            self.assertFalse(bot.verify_audio_output(truncated, source)[0])
+
+    def test_unavailable_decoded_duration_keeps_validation_closed(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            source, output = self.variable_bitrate_fixture(Path(td))
+            original_run = bot.run
+            for failed_path in [source, output]:
+                with self.subTest(path=failed_path.name):
+                    def run(cmd, timeout=600):
+                        if 'stream=sample_rate:frame=nb_samples' in cmd and cmd[-1] == str(failed_path):
+                            return 1, 'decode failed'
+                        return original_run(cmd, timeout)
+                    with patch('course_audio_bot.run', side_effect=run):
+                        self.assertFalse(bot.verify_audio_output(output, source)[0])
+
     def test_video_source_is_converted(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); wav = root / "source.wav"; write_wav(wav)

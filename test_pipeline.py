@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from pipeline import Pipeline, Candidate
-from ppr_cli import SafariAdapter
+from browser_adapter import SafariAdapter
 
 class Adapter:
     def __init__(self, fail=False, wrong=False):
@@ -50,6 +50,29 @@ class PipelineTests(unittest.TestCase):
         self.root = Path(self.temp.name)
     def pipe(self, adapter=None, **kwargs):
         return Pipeline(self.root, adapter or Adapter(), reserve_bytes=0, **kwargs)
+    def test_site_names_preserved_in_real_output_and_identity(self):
+        pipe = self.pipe()
+        first = {'url': 'https://test/course/1', 'title': '2. Aula 08 – Prosa – Parte II',
+                 'site_path': ['Example Formation', 'Semana 36', '2. Aula 08 – Prosa – Parte II']}
+        result = pipe.one(first)
+        self.assertEqual(result['status'], 'ok', result)
+        self.assertEqual(Path(result['final']).relative_to(self.root).parts,
+                         (*first['site_path'][:-1], first['site_path'][-1] + '.m4a'))
+        second = dict(first, url='https://test/course/2',
+                      site_path=['Example Formation', 'Semana 37', first['title']])
+        other = pipe.one(second)
+        self.assertEqual(other['status'], 'ok', other)
+        self.assertNotEqual(result['source_identity'], other['source_identity'])
+        self.assertNotEqual(result['final'], other['final'])
+    def test_unsafe_site_names_fail_without_download_or_escape(self):
+        for parts in [['..', 'aula'], ['Semana 01', '../aula'], ['Semana:01', 'aula'],
+                      ['Semana 01', 'a\\b'], ['Semana 01', ''], 'Semana 01']:
+            with self.subTest(parts=parts):
+                adapter = Adapter()
+                result = self.pipe(adapter).one({'url': 'https://test/invalid', 'site_path': parts})
+                self.assertEqual(result['status'], 'failed', result)
+                self.assertEqual(adapter.encoded, 0)
+                self.assertFalse(list(self.root.rglob('*.m4a')))
     def test_real_encode_validation_resume_no_resolver_or_decode(self):
         adapter = Adapter(); pipe = self.pipe(adapter)
         result = pipe.one('https://test/a')
@@ -155,27 +178,177 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(backups),1)
         self.assertEqual(backups[0].read_bytes(),old_bytes)
     def test_title_suffix_is_normalized_but_other_lesson_not_accepted(self):
-        from ppr_cli import normalize_title
-        self.assertEqual(normalize_title('Aula X | Padre Paulo Ricardo'),normalize_title('Aula X'))
+        from browser_adapter import normalize_title
+        self.assertEqual(normalize_title('Aula X | Example Academy', r'\s*[|]\s*Example Academy$'),normalize_title('Aula X'))
         self.assertNotEqual(normalize_title('Aula anterior'),normalize_title('Aula X'))
 
     def test_safari_waits_for_expected_title_and_signed_query_stability(self):
         adapter=SafariAdapter(timeout=2)
-        lesson={'url':'https://padrepauloricardo.org/aulas/new','title':'Nova aula'}
+        lesson={'url':'https://lessons.example.test/aulas/new','title':'Nova aula'}
         pages=[{'url':lesson['url'],'title':title,'ready':'complete','auth':True,
                 'links':[{'url':'https://cdn.test/new.mp3?sig='+str(i),'label':'Áudio da aula (mp3)'}]}
                for i,title in enumerate(['Aula anterior','Nova aula','Nova aula','Nova aula'])]
         def evaluate(navigate=None):
             return {} if navigate else pages.pop(0)
         adapter._eval=evaluate
-        with patch('ppr_cli.time.sleep'):
+        with patch('browser_adapter.time.sleep'):
             candidates=adapter.resolve(lesson)
         self.assertEqual(candidates[0].url,'https://cdn.test/new.mp3?sig=3')
         self.assertEqual(len(pages),0)
+
+    def test_safari_resolves_stable_named_mp3_when_document_is_interactive(self):
+        import itertools
+        lesson = {'url': 'https://lessons.example.test/aulas/ready', 'title': 'Ready lesson'}
+        page = {'url': lesson['url'], 'canonical': lesson['url'], 'title': lesson['title'],
+                'auth': True, 'ready': 'interactive',
+                'links': [{'url': 'https://cdn.test/ready.mp3', 'label': 'Áudio da aula (mp3)'}]}
+        adapter = SafariAdapter(timeout=6)
+        polls = []
+        def evaluate(navigate=None):
+            if navigate:
+                return {}
+            polls.append(1)
+            return dict(page)
+        adapter._eval = evaluate
+        with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+            candidates = adapter.resolve(lesson)
+        self.assertEqual(candidates[0].url, 'https://cdn.test/ready.mp3')
+        self.assertEqual(len(polls), 3)
+
+    def test_interactive_mp3_keeps_url_title_auth_and_canonical_guards(self):
+        import itertools
+        lesson = {'url': 'https://lessons.example.test/aulas/ready', 'title': 'Ready lesson'}
+        base = {'url': lesson['url'], 'canonical': lesson['url'], 'title': lesson['title'],
+                'auth': True, 'ready': 'interactive',
+                'links': [{'url': 'https://cdn.test/ready.mp3', 'label': 'Áudio da aula (mp3)'}]}
+        for changes in [{'auth': False}, {'title': 'Other lesson'},
+                        {'url': 'https://lessons.example.test/aulas/other'},
+                        {'canonical': 'https://lessons.example.test/aulas/other'}, {'ready': 'loading'}]:
+            with self.subTest(changes=changes):
+                page = dict(base, **changes)
+                adapter = SafariAdapter(timeout=6)
+                adapter._eval = lambda navigate=None: {} if navigate else dict(page)
+                with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+                    with self.assertRaisesRegex(RuntimeError, 'Safari-lesson-identity-timeout'):
+                        adapter.resolve(lesson)
+
+    def test_interactive_generic_audio_still_waits_for_complete_document(self):
+        import itertools
+        lesson = {'url': 'https://lessons.example.test/aulas/ready', 'title': 'Ready lesson'}
+        page = {'url': lesson['url'], 'title': lesson['title'], 'auth': True,
+                'links': [{'url': 'https://cdn.test/ready.mp3', 'label': 'Audio'}]}
+        calls = []
+        def evaluate(navigate=None):
+            if navigate:
+                return {}
+            calls.append(1)
+            return dict(page, ready='interactive' if len(calls) <= 3 else 'complete')
+        adapter = SafariAdapter(timeout=12)
+        adapter._eval = evaluate
+        with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+            result = adapter.resolve(lesson)
+        self.assertEqual(result[0].kind, 'audio')
+        self.assertEqual(len(calls), 6)
+
+    def test_interactive_mp3_needs_three_authenticated_matching_observations(self):
+        import itertools
+        lesson = {'url': 'https://lessons.example.test/aulas/ready', 'title': 'Ready lesson'}
+        page = {'url': lesson['url'], 'title': lesson['title'], 'ready': 'interactive',
+                'links': [{'url': 'https://cdn.test/ready.mp3', 'label': 'Áudio da aula (mp3)'}]}
+        calls = []
+        def evaluate(navigate=None):
+            if navigate:
+                return {}
+            calls.append(1)
+            return dict(page, auth=len(calls) > 1)
+        adapter = SafariAdapter(timeout=12)
+        adapter._eval = evaluate
+        with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+            result = adapter.resolve(lesson)
+        self.assertEqual(result[0].kind, 'mp3')
+        self.assertEqual(len(calls), 4)
+    def test_safari_accepts_only_catalogued_number_prefix(self):
+        import itertools
+        lesson = {'url': 'https://lessons.example.test/aulas/navegacoes',
+                  'title': 'Como organizar uma seção de exemplo?', 'number': 1}
+        page = {'url': lesson['url'], 'title': '1. ' + lesson['title'],
+                'auth': True, 'ready': 'complete',
+                'links': [{'url': 'https://cdn.test/a.mp3', 'label': 'Áudio da aula (mp3)'}]}
+        adapter = SafariAdapter(timeout=4)
+        adapter._eval = lambda navigate=None: {} if navigate else dict(page)
+        with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+            candidates = adapter.resolve(lesson)
+        self.assertEqual(candidates[0].url, 'https://cdn.test/a.mp3')
+
+    def test_safari_number_prefix_keeps_identity_checks(self):
+        import itertools
+        base = {'url': 'https://lessons.example.test/aulas/navegacoes',
+                'title': 'Como organizar uma seção de exemplo?', 'number': 1}
+        for title, url, number in [
+                ('2. ' + base['title'], base['url'], 1),
+                ('1. Aula diferente', base['url'], 1),
+                ('1. ' + base['title'], 'https://lessons.example.test/aulas/other', 1),
+                ('1. ' + base['title'], base['url'], None)]:
+            with self.subTest(title=title, url=url, number=number):
+                lesson = dict(base, number=number)
+                page = {'url': url, 'title': title, 'auth': True, 'ready': 'complete',
+                        'links': [{'url': 'https://cdn.test/a.mp3', 'label': 'Áudio da aula (mp3)'}]}
+                adapter = SafariAdapter(timeout=4)
+                adapter._eval = lambda navigate=None: {} if navigate else dict(page)
+                with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+                    with self.assertRaisesRegex(RuntimeError, 'Safari-lesson-identity-timeout'):
+                        adapter.resolve(lesson)
+
+    def test_explicit_provider_title_keeps_catalogue_name_and_stem(self):
+        import itertools
+        from browser_adapter import load_lessons
+        catalogue = self.root / 'catalogue.json'
+        item = {'url': 'https://lessons.example.test/aulas/example',
+                'title': 'Título curto', 'provider_title': 'Título editorial longo'}
+        catalogue.write_text(json.dumps({'courses': [{'title': 'Course', 'lessons': [item]}]}))
+        lesson = load_lessons(catalogue)[0]
+        page = {'url': lesson['url'], 'title': lesson['provider_title'],
+                'auth': True, 'ready': 'complete',
+                'links': [{'url': 'https://cdn.test/a.mp3', 'label': 'Áudio da aula (mp3)'}]}
+        adapter = SafariAdapter(timeout=4)
+        adapter._eval = lambda navigate=None: {} if navigate else dict(page)
+        with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+            self.assertEqual(adapter.resolve(lesson)[0].url, 'https://cdn.test/a.mp3')
+        self.assertEqual(lesson['title'], 'Título curto')
+        self.assertEqual(lesson['stem'], '01-001-título-curto')
+
+    def test_provider_title_requires_exact_alias_url_and_authentication(self):
+        import itertools
+        item = {'url': 'https://lessons.example.test/aulas/example',
+                'title': 'Título curto', 'provider_title': 'Título editorial longo'}
+        for alias, title, url, auth in [
+                (None, item['provider_title'], item['url'], True),
+                (item['provider_title'], 'Outra aula', item['url'], True),
+                (item['provider_title'], item['provider_title'], 'https://lessons.example.test/aulas/other', True),
+                (item['provider_title'], item['provider_title'], item['url'], False)]:
+            with self.subTest(alias=alias, title=title, url=url, auth=auth):
+                lesson = dict(item, provider_title=alias)
+                page = {'url': url, 'title': title, 'auth': auth, 'ready': 'complete',
+                        'links': [{'url': 'https://cdn.test/a.mp3', 'label': 'Áudio da aula (mp3)'}]}
+                adapter = SafariAdapter(timeout=4)
+                adapter._eval = lambda navigate=None: {} if navigate else dict(page)
+                with patch('browser_adapter.time.sleep'), patch('browser_adapter.time.monotonic', side_effect=itertools.count()):
+                    with self.assertRaisesRegex(RuntimeError, 'Safari-lesson-identity-timeout'):
+                        adapter.resolve(lesson)
+
+    def test_invalid_provider_title_is_rejected_before_safari(self):
+        for alias in ['', [], 42]:
+            with self.subTest(alias=alias):
+                adapter = SafariAdapter()
+                with patch.object(adapter, '_eval', side_effect=AssertionError('touched Safari')):
+                    with self.assertRaisesRegex(ValueError, 'provider_title'):
+                        adapter.resolve({'url': 'https://lessons.example.test/aulas/example',
+                                         'title': 'Título curto', 'provider_title': alias})
+
     def test_missing_safari_session_fails_without_download(self):
         adapter=SafariAdapter(timeout=0)
         adapter._eval=lambda navigate=None: (_ for _ in ()).throw(RuntimeError('Safari-unavailable'))
-        with patch('ppr_cli.time.sleep'), self.assertRaisesRegex(RuntimeError,'navigation'):
-            adapter.resolve({'url':'https://padrepauloricardo.org/aulas/new','title':'Nova aula'})
+        with patch('browser_adapter.time.sleep'), self.assertRaisesRegex(RuntimeError,'navigation'):
+            adapter.resolve({'url':'https://lessons.example.test/aulas/new','title':'Nova aula'})
 
 if __name__=='__main__':unittest.main()
