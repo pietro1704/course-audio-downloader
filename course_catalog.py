@@ -43,6 +43,13 @@ def load_lessons(path):
     paths = [unicodedata.normalize('NFD', str(relative_audio_path(x))).casefold() for x in lessons]
     if len(set(identities)) != len(lessons) or len(set(paths)) != len(lessons):
         raise ValueError('duplicate-catalogue-identity-or-path')
+    sharing = {ident: Pipeline.shared_source_identities(lesson)
+               for ident, lesson in zip(identities, lessons)}
+    for ident, peers in sharing.items():
+        if not peers <= sharing.keys():
+            raise ValueError('unknown-shared-source-identity')
+        if any(ident not in sharing[peer] for peer in peers):
+            raise ValueError('asymmetric-shared-source-permission')
     if strict and len(lessons) != data['expected_count']: raise ValueError('catalogue-count-mismatch')
     if not lessons: raise ValueError('empty-catalogue')
     return lessons
