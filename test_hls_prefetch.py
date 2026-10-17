@@ -10,9 +10,10 @@ class HLSPrefetchTests(unittest.TestCase):
     def fixture(self,root):
         key=root/'key.bin';key.write_bytes(bytes(range(16)))
         info=root/'key-info';info.write_text('https://cdn.example/key?secret=KEY\n'+str(key)+'\n')
-        subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-f','lavfi','-i','sine=duration=3:frequency=440',
-            '-c:a','aac','-b:a','64k','-f','hls','-hls_time','.4','-hls_list_size','0',
-            '-hls_key_info_file',str(info),'-hls_segment_filename',str(root/'part%03d.ts'),str(root/'source.m3u8')],check=True,capture_output=True)
+        result=subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-f','lavfi','-i','sine=duration=3:frequency=440',
+            '-c:a','aac','-b:a','64k','-f','hls','-hls_time','0.4','-hls_list_size','0',
+            '-hls_key_info_file',str(info),'-hls_segment_filename',str(root/'part%03d.ts'),str(root/'source.m3u8')],capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr.decode())
         return (root/'source.m3u8').read_text()
 
     def test_encrypted_audio_roundtrip_prefetches_in_parallel_and_preserves_packets(self):
