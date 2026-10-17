@@ -18,6 +18,7 @@ from pipeline import Pipeline,PRESET
 from icloud_bridge import uploaded
 from documents import DocumentDelivery, document_preflight
 from document_browser import DocumentBrowser
+from transfer_errors import failure_reason
 
 
 def build_adapter(profile,encoder='aac_at'):
@@ -126,7 +127,8 @@ def main(argv=None):
     if args.documents_only:
         try:documents.run(lessons);return 0
         except KeyboardInterrupt:documents.cancel();return 130
-        except Exception:return 2
+        except Exception as error:
+            print(json.dumps(dict(ok=False,reason=failure_reason(error))));return 2
     docs=root/'Documentacao';docs.mkdir(parents=True,exist_ok=True)
     with (docs/'delivery.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -157,8 +159,8 @@ def main(argv=None):
             progress.event('finished',delivered=delivery.completed_count());return 0
         except KeyboardInterrupt:
             delivery.cancel();documents.cancel();progress.event('interrupted',delivered=delivery.completed_count());return 130
-        except Exception:
-            progress.event('failed',reason='course-delivery-failed',delivered=delivery.completed_count());return 2
+        except Exception as error:
+            progress.event('failed',reason=failure_reason(error),delivered=delivery.completed_count());return 2
         finally:stopped.set();worker.join(timeout=2)
 
 

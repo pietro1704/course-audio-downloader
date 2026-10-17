@@ -83,6 +83,12 @@ of `path` and `sha256` also pin engine and input files. Independent lanes must
 bind separate existing tabs. Status records exit codes, progress, retry limits
 and available disk; errors remain in the private job log.
 
+Failure manifests and terminal status retain known transfer reason codes such as
+`embedded-lesson-identity-timeout`, `login-required` and `disk-reserve`. Document
+pages also retain the failed inventory reason and timestamp. Unknown exception
+messages are replaced by their type so signed URLs and other private values do
+not enter public diagnostics.
+
 ### Documentos das aulas
 
 `course-deliver` também inventaria e entrega os documentos originais de todas as

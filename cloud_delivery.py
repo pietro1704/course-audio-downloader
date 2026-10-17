@@ -16,6 +16,7 @@ from pathlib import Path
 
 import course_audio_bot as audio
 import artwork
+from transfer_errors import failure_reason
 from icloud_bridge import uploaded
 from file_delivery import FilePublisher
 from pipeline import Pipeline, PRESET
@@ -206,7 +207,7 @@ class Delivery(FilePublisher):
         else:
             record = self.pipeline.one(lesson)
             if record['status'] != 'ok':
-                raise RuntimeError('lesson-pipeline-failed')
+                raise RuntimeError(record.get('reason','lesson-pipeline-failed'))
         receipt = {'schema': 1, 'state': 'prepared', 'source_identity': ident,
                    'title': lesson['title'], 'params': PRESET, 'cloud': str(target),
                    **{key: record[key] for key in ('original', 'final', 'source_hash', 'final_hash')},
@@ -256,14 +257,14 @@ class Delivery(FilePublisher):
             if reconcile_original_artwork and isinstance(error,Exception):
                 self.record_artwork_attempt(ident,'failed',error)
                 if self.artwork_source_failure(error):
-                    self.event('failed',error_type=type(error).__name__)
+                    self.event('failed',error_type=type(error).__name__,reason=failure_reason(error))
                     raise
             with self._journal_lock:
                 if self._failure is None and str(error) != 'delivery-cancelled':
                     self._failure = error
             self.cancel()
             self.event('cancelled' if str(error) == 'delivery-cancelled' else 'failed',
-                       error_type=type(error).__name__)
+                       error_type=type(error).__name__,reason=failure_reason(error))
             raise
         finally:
             with self._journal_lock:
