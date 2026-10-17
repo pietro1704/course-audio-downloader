@@ -242,6 +242,115 @@ class ArtworkTests(unittest.TestCase):
         self.assertEqual(self.ffmpeg('-i', str(target), '-map', '0:a:0', '-c:a', 'copy', '-f', 'adts', 'pipe:1'), before)
         self.assertFalse(Path(receipt['final']).exists())
 
+    def legacy_completed(self):
+        pipe,cloud,target,lesson=self.old_pending()
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        # Model an old native receipt whose source and local encoding were cleaned
+        # before the attached-artwork preservation policy existed.
+        receipt=dict(delivery.journal[Pipeline.identity(lesson['url'])])
+        receipt.update(state='complete',uploaded_mtime_ns=target.stat().st_mtime_ns)
+        delivery.save(receipt)
+        Path(receipt['original']).unlink();Path(receipt['final']).unlink()
+        return pipe,cloud,target,lesson,receipt
+
+    def test_original_artwork_reconciliation_preserves_audio_and_cleans_after_upload(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        before=self.ffmpeg('-i',str(target),'-map','0:a:0','-c:a','copy','-f','adts','pipe:1')
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        with patch.object(pipe.adapter,'encode',side_effect=AssertionError('must-not-reencode')):
+            receipts=delivery.run([(lesson,target)],reconcile_original_artwork=True)
+        receipt=receipts[0]
+        self.assertEqual(receipt['state'],'complete');self.assertEqual(receipt['artwork']['origin'],'embedded')
+        self.assertEqual(receipt['source_hash'],old['source_hash'])
+        self.assertEqual(self.cover_bytes(target),self.cover.read_bytes())
+        self.assertEqual(self.ffmpeg('-i',str(target),'-map','0:a:0','-c:a','copy','-f','adts','pipe:1'),before)
+        self.assertFalse(Path(receipt['original']).exists());self.assertFalse(Path(receipt['final']).exists())
+
+    def test_original_reconciliation_rejects_changed_source_without_mutating_cloud(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        before=target.read_bytes();delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0)
+        def wrong(candidate,path):path.write_bytes(b'wrong-source');return path
+        with patch.object(pipe.adapter,'download',side_effect=wrong):
+            with self.assertRaisesRegex(RuntimeError,'artwork-original-content-changed'):
+                delivery.process(lesson,target,reconcile_original_artwork=True)
+        self.assertEqual(target.read_bytes(),before)
+        self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
+        self.assertTrue(any(p.read_bytes()==b'wrong-source' for p in pipe.root.rglob('source.mp3')))
+
+    def test_original_reconciliation_cancellation_preserves_old_receipt_and_resumes(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        before=target.read_bytes();delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0)
+        download=pipe.adapter.download
+        def cancel(candidate,path):
+            result=download(candidate,path);delivery.cancel();return result
+        with patch.object(pipe.adapter,'download',side_effect=cancel):
+            with self.assertRaisesRegex(RuntimeError,'delivery-cancelled'):
+                delivery.run([(lesson,target)],reconcile_original_artwork=True)
+        self.assertEqual(target.read_bytes(),before)
+        self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
+        resumed=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        self.assertEqual(resumed.run([(lesson,target)],reconcile_original_artwork=True)[0]['artwork']['origin'],'embedded')
+
+    def test_original_reconciliation_rejects_identity_before_source_download(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0)
+        with patch.object(pipe.adapter,'download') as download:
+            with self.assertRaisesRegex(RuntimeError,'delivery-identity-mismatch'):
+                delivery.process(lesson,target.with_name('other.m4a'),reconcile_original_artwork=True)
+            download.assert_not_called()
+
+    def test_original_source_blocker_does_not_starve_another_lesson(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        other={**lesson,'url':'https://test/other','title':'Other','stem':'other'}
+        other_target=target.with_name('other.m4a');shutil.copyfile(target,other_target)
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0,concurrency=2)
+        folder,other_final=delivery.paths(other)
+        other_receipt={**old,'title':other['title'],'source_identity':Pipeline.identity(other['url']),
+                       'cloud':str(other_target),'final':str(other_final),
+                       'original':str(folder/'originals/other.mp3'),
+                       'uploaded_mtime_ns':other_target.stat().st_mtime_ns}
+        delivery.save(other_receipt)
+        download=pipe.adapter.download
+        def resolve(l):
+            return [Candidate('https://cdn.test/'+l['title']+'.mp3','mp3')]
+        def fail_first(candidate,path):
+            if candidate.url.endswith('/Lesson.mp3'):path.write_bytes(b'changed-source');return path
+            return download(candidate,path)
+        with patch.object(pipe.adapter,'resolve',side_effect=resolve),patch.object(pipe.adapter,'download',side_effect=fail_first):
+            with self.assertRaisesRegex(RuntimeError,'artwork-reconciliation-incomplete'):
+                delivery.run([(lesson,target),(other,other_target)],reconcile_original_artwork=True)
+        attempts=json.loads((delivery.docs/'artwork-attempts.json').read_text())
+        self.assertEqual(attempts[Pipeline.identity(lesson['url'])]['reason'],'artwork-original-content-changed')
+        self.assertEqual(attempts[Pipeline.identity(other['url'])]['state'],'complete')
+        self.assertEqual(delivery.journal[Pipeline.identity(other['url'])]['artwork']['origin'],'embedded')
+        self.assertNotIn('artwork',delivery.journal[Pipeline.identity(lesson['url'])])
+
+    def test_original_reconciliation_waits_for_native_upload_before_cleanup(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        calls=[]
+        def upload_pending(path):
+            calls.append(path)
+            if len(calls)>1:cloud.ready=False
+        cloud.on_status=upload_pending
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        with self.assertRaisesRegex(RuntimeError,'icloud-upload-timeout'):
+            delivery.run([(lesson,target)],reconcile_original_artwork=True)
+        self.assertTrue(Path(old['original']).is_file());self.assertTrue(Path(old['final']).is_file())
+        cloud.on_status=None;cloud.ready=True
+        resumed=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        self.assertEqual(resumed.run([(lesson,target)],reconcile_original_artwork=True)[0]['state'],'complete')
+        self.assertFalse(Path(old['original']).exists());self.assertFalse(Path(old['final']).exists())
+
+    def test_original_reconciliation_records_no_cover_after_original_and_video_attempts(self):
+        pipe,cloud,target,lesson,old=self.completed_without_cover()
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        old=dict(old);old.pop('artwork');delivery.save(old)
+        with patch.object(pipe.adapter,'thumbnail',return_value=None) as thumbnail:
+            receipt=delivery.run([(lesson,target)],reconcile_original_artwork=True)[0]
+        self.assertEqual(receipt['artwork']['origin'],'none')
+        self.assertIn('original_artwork_recovered_at',receipt)
+        thumbnail.assert_called_once()
+
     def test_completed_cover_refresh_recovers_cancellation_without_original(self):
         pipe, cloud, target, lesson, old = self.completed_without_cover()
         before = target.read_bytes()
