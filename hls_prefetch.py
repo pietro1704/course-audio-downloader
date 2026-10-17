@@ -66,14 +66,14 @@ class PrefetchedPlaylist:
                         segment=int(route.split('/')[1][:-3])
                         if not 0<=segment<len(owner.segments):self.send_error(404);return
                         future=owner.futures.get(segment)
-                        body=future.result() if future else owner.fetch(owner.segments[segment],owner.referer)
+                        body=(future or owner.pool.submit(owner.fetch,owner.segments[segment],owner.referer)).result()
                         kind='video/mp2t'
                     elif re.fullmatch(r'key/\d+',route):
                         index=int(route.split('/')[1])
                         if not 0<=index<len(owner.keys):self.send_error(404);return
                         body=owner.key_cache.get(index)
                         if body is None:
-                            body=owner.fetch(owner.keys[index],owner.referer)
+                            body=owner.pool.submit(owner.fetch,owner.keys[index],owner.referer).result()
                             if len(body)!=16:raise RuntimeError('invalid-prefetch-key-size')
                             if len(owner.key_cache)>=4:owner.key_cache.pop(next(iter(owner.key_cache)))
                             owner.key_cache[index]=body
@@ -87,7 +87,7 @@ class PrefetchedPlaylist:
                         owner.futures.pop(segment,None)
                         # At most width prefetched fragments plus the current response.
                         following=segment+owner.width
-                        if following<len(owner.segments) and following not in owner.futures:
+                        if following<len(owner.segments) and following not in owner.futures and len(owner.futures)<owner.width:
                             owner.futures[following]=owner.pool.submit(owner.fetch,owner.segments[following],owner.referer)
                 except (BrokenPipeError,ConnectionResetError):pass
                 except Exception:
