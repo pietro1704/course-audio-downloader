@@ -53,8 +53,26 @@ class SafariAdapter:
     def _take_link_navigation_context(self):
         return None
 
+    def _activation_script(self):
+        activate = self.profile.get('activate_browser_tab', False)
+        if type(activate) is not bool:
+            raise ValueError('invalid-browser-activation')
+        if not activate:
+            return ''
+        target = self.profile.get('browser_target')
+        if target is None:
+            raise ValueError('activation-requires-explicit-browser-target')
+        if (not isinstance(target, dict) or
+                any(type(target.get(key)) is not int or target[key] < 1
+                    for key in ('window_id', 'tab_index'))):
+            raise ValueError('invalid-browser-target')
+        # Insert only inside the existing target's origin guard. Never activate
+        # Safari itself or create a replacement window/tab.
+        return 'set current tab of window id ' + str(target['window_id']) + ' to t\n'
+
     def _eval(self, navigate=None, *, force_reload=False):
         if not self.origin: raise RuntimeError('missing-profile-origin')
+        activation = self._activation_script()
         command = ('set URL of t to ' + json.dumps(navigate, ensure_ascii=False) + '\nreturn "navigation-requested"') if navigate else ('return do JavaScript ' + json.dumps(inspection_script(self.profile), ensure_ascii=False) + ' in t')
         context=None
         if navigate and not force_reload and self.profile.get('navigation_mode')=='matching-link':
@@ -81,7 +99,7 @@ end tell'''
             script = ('tell application "Safari"\nset t to tab ' + str(target['tab_index']) +
                       ' of window id ' + str(target['window_id']) +
                       '\nif (URL of t) starts with ' + json.dumps(self.origin.rstrip('/') + '/') +
-                      ' then\n' + command + '\nend if\nerror "Browser target changed"\nend tell')
+                      ' then\n' + activation + command + '\nend if\nerror "Browser target changed"\nend tell')
         result = self._osa(script)
         if fast:
             if result=='reload-required':return self._eval(navigate,force_reload=True)

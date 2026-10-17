@@ -14,7 +14,7 @@ class DocumentBrowser(SafariAdapter):
                 for k in ('window_id','tab_index'))):raise ValueError('documents-require-explicit-browser-target')
         command=('tell application "Safari"\nset t to tab '+str(target['tab_index'])+
                  ' of window id '+str(target['window_id'])+'\nif (URL of t) starts with '+
-                 json.dumps(self.origin.rstrip('/')+'/')+' then\nreturn do JavaScript '+
+                 json.dumps(self.origin.rstrip('/')+'/')+' then\n'+self._activation_script()+'return do JavaScript '+
                  json.dumps(script,ensure_ascii=False)+' in t\nend if\nerror "Browser target changed"\nend tell')
         return json.loads(self._osa(command))
 
