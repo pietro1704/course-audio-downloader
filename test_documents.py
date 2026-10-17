@@ -51,6 +51,8 @@ class DocumentsTests(unittest.TestCase):
         with patch('documents.urllib.request.urlopen',side_effect=AssertionError('repeat download')):
             self.assertTrue(self.d.run([self.lesson])['ok'])
         self.assertNotIn('token=private',json.dumps(self.d.journal))
+        changed=dict(resources[0]);changed.pop('shared_path_with');changed.pop('shared_file_sha256')
+        with self.assertRaisesRegex(ValueError,'identity-mismatch'):self.d.one(self.lesson,changed)
 
     def test_shared_document_permission_does_not_allow_changed_bytes_or_replace_valid_cloud_file(self):
         resources=self.shared_resources();self.adapter.inventory.return_value=resources

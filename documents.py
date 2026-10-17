@@ -174,8 +174,9 @@ class DocumentDelivery:
                 receipt['source_hash']!=receipt['final_hash']):
             raise ValueError('document-receipt-identity-mismatch')
         peers=resource.get('shared_path_with',[])
-        if peers and (receipt.get('shared_resource_ids')!=sorted(hashlib.sha256(p.encode()).hexdigest() for p in peers)
-                      or receipt['source_hash']!=resource['shared_file_sha256']):
+        if (peers or receipt.get('shared_resource_ids')) and (
+                receipt.get('shared_resource_ids')!=sorted(hashlib.sha256(p.encode()).hexdigest() for p in peers)
+                or receipt['source_hash']!=resource.get('shared_file_sha256')):
             raise ValueError('document-receipt-identity-mismatch')
         return local,target
 
