@@ -277,6 +277,68 @@ class ArtworkTests(unittest.TestCase):
         self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
         self.assertTrue(any(p.read_bytes()==b'wrong-source' for p in pipe.root.rglob('source.mp3')))
 
+    def unavailable_original(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        def changed(candidate,path):path.write_bytes(b'changed-source-preserved');return path
+        with patch.object(pipe.adapter,'download',side_effect=changed),self.assertRaisesRegex(RuntimeError,'artwork-original-content-changed'):
+            delivery.process(lesson,target,reconcile_original_artwork=True)
+        return pipe,cloud,target,lesson,old,Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+
+    def test_explicit_unavailable_original_fallback_preserves_delivered_audio(self):
+        pipe,cloud,target,lesson,old,delivery=self.unavailable_original()
+        before=self.ffmpeg('-i',str(target),'-map','0:a:0','-c:a','copy','-f','adts','pipe:1')
+        with patch.object(pipe.adapter,'download',side_effect=AssertionError('must not substitute source')),patch.object(pipe.adapter,'encode',side_effect=AssertionError('must not re-encode audio')),patch.object(pipe.adapter,'thumbnail',return_value=self.cover):
+            receipt=delivery.refresh_completed_artwork(lesson,target,allow_unavailable_original=True)
+        self.assertEqual(receipt['artwork']['origin'],'video')
+        self.assertEqual(receipt['source_hash'],old['source_hash'])
+        self.assertEqual(receipt['original_artwork_unavailable']['reason'],'artwork-original-content-changed')
+        self.assertEqual(self.cover_bytes(target),self.cover.read_bytes())
+        self.assertEqual(self.ffmpeg('-i',str(target),'-map','0:a:0','-c:a','copy','-f','adts','pipe:1'),before)
+        self.assertFalse(Path(receipt['original']).exists());self.assertFalse(Path(receipt['final']).exists())
+        self.assertTrue(any(p.read_bytes()==b'changed-source-preserved' for p in pipe.root.rglob('source.mp3')))
+
+    def test_unavailable_original_fallback_is_opt_in_and_requires_recorded_failure(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0)
+        with self.assertRaisesRegex(RuntimeError,'artwork-refresh-not-applicable'):
+            delivery.refresh_completed_artwork(lesson,target)
+        with self.assertRaisesRegex(RuntimeError,'original-artwork-unavailability-not-recorded'):
+            delivery.refresh_completed_artwork(lesson,target,allow_unavailable_original=True)
+        self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
+
+    def test_unavailable_original_fallback_rejects_available_source(self):
+        pipe,cloud,target,lesson,old,delivery=self.unavailable_original()
+        original=Path(old['original']);original.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.source,original)
+        with self.assertRaisesRegex(RuntimeError,'original-artwork-source-still-available'):
+            delivery.refresh_completed_artwork(lesson,target,allow_unavailable_original=True)
+        self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
+        self.assertTrue(original.exists())
+
+    def test_unavailable_original_fallback_waits_for_upload_and_checks_identity(self):
+        pipe,cloud,target,lesson,old,delivery=self.unavailable_original()
+        with patch.object(pipe.adapter,'resolve') as resolve:
+            with self.assertRaisesRegex(RuntimeError,'delivery-identity-mismatch'):
+                delivery.refresh_completed_artwork(lesson,target.with_name('other.m4a'),allow_unavailable_original=True)
+            resolve.assert_not_called()
+        cloud.ready=False
+        with self.assertRaisesRegex(RuntimeError,'icloud-upload-timeout'):
+            delivery.refresh_completed_artwork(lesson,target,allow_unavailable_original=True)
+        self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
+
+    def test_unavailable_original_fallback_cancellation_preserves_receipt(self):
+        pipe,cloud,target,lesson,old,delivery=self.unavailable_original();delivery.cancel()
+        with patch.object(pipe.adapter,'resolve') as resolve,self.assertRaisesRegex(RuntimeError,'delivery-cancelled'):
+            delivery.refresh_completed_artwork(lesson,target,allow_unavailable_original=True)
+        resolve.assert_not_called();self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
+
+    def test_unavailable_original_can_remain_without_cover_after_video_attempt(self):
+        pipe,cloud,target,lesson,old,delivery=self.unavailable_original()
+        with patch.object(pipe.adapter,'thumbnail',return_value=None) as thumbnail:
+            receipt=delivery.refresh_completed_artwork(lesson,target,allow_unavailable_original=True)
+        thumbnail.assert_called_once();self.assertEqual(receipt['artwork']['origin'],'none')
+        self.assertIn('original_artwork_unavailable',receipt)
+
     def test_original_reconciliation_cancellation_preserves_old_receipt_and_resumes(self):
         pipe,cloud,target,lesson,old=self.legacy_completed()
         before=target.read_bytes();delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0)
