@@ -65,6 +65,25 @@ class CourseContractsTests(unittest.TestCase):
             self.assertEqual(main(args),0)
         self.assertEqual(delivery.call_args.kwargs['upload_timeout'],3600)
 
+    def test_worker_admission_uses_free_space_before_submitting_parallel_sources(self):
+        import shutil
+        catalog,profile,_=self.inputs('limited-space')
+        args=['--catalog',str(catalog),'--profile',str(profile),'--root',str(self.base/'work'),
+              '--destination',str(self.base/'cloud'),'--icloud-python','python','--concurrency','8']
+        for free,expected in [(5*1024**3,1),(int(6.25*1024**3),4),(int(8.25*1024**3),8)]:
+            with self.subTest(free=free),patch('course_cli.Delivery') as delivery,\
+                 patch('course_cli.DocumentDelivery') as documents,patch('course_cli.NativeCloud'),\
+                 patch('course_cli.DocumentBrowser'),patch('course_cli.build_adapter'),\
+                 patch('course_cli.shutil.disk_usage',return_value=shutil._ntuple_diskusage(20*1024**3,0,free)),\
+                 contextlib.redirect_stdout(io.StringIO()):
+                delivery.return_value.journal={};delivery.return_value.completed_count.return_value=0
+                self.assertEqual(main(args),0)
+                self.assertEqual(delivery.call_args.kwargs['concurrency'],expected)
+                self.assertEqual(documents.call_args.kwargs['concurrency'],expected)
+                status=json.loads((self.base/'work/Documentacao/delivery-status.json').read_text())
+                self.assertEqual(status['concurrency'],expected)
+
+
     def test_audio_failure_status_retains_actionable_identity_code(self):
         catalog,profile,_=self.inputs('identity-failure')
         root=self.base/'identity-failure-work'
