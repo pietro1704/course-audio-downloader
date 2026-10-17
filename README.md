@@ -48,6 +48,9 @@ the encoded audio stream, uses bounded concurrency with serialized navigation,
 and resumes the existing artwork publication transaction. Changed source bytes
 stop safely, preserving the failed download and existing cloud audio. Local
 sources remain until native upload confirmation, then the cloud cache is evicted.
+Per-lesson source blockers are recorded in `artwork-attempts.json` while other
+lessons continue; cloud, disk and browser failures still stop the lane for bounded
+supervisor recovery. Any unresolved artwork blocker makes the run fail.
 
 Run the same regression gate as CI (Node 22+ is needed for generated browser-JavaScript contract tests):
 

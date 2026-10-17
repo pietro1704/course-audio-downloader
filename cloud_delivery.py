@@ -85,6 +85,12 @@ class ObservedAdapter:
 
 
 class Delivery(FilePublisher):
+    @staticmethod
+    def artwork_source_failure(error):
+        return str(error) in {'artwork-original-content-changed','delivery-identity-mismatch',
+                              'no-audio-candidate','unsupported-player-frame',
+                              'source-size-budget-exceeded','hls-source-budget-exceeded'}
+
     def __init__(self, root, destination, cloud, adapter=None, reserve_bytes=4 * 1024**3,
                  upload_timeout=900, poll_seconds=3, event=None, concurrency=1):
         self.root = Path(root).resolve()
@@ -243,8 +249,15 @@ class Delivery(FilePublisher):
                 raise RuntimeError('delivery-cancelled')
             if reconcile_original_artwork:
                 self.recover_original_artwork(lesson, target)
-            return self._process(lesson, target)
+            result=self._process(lesson, target)
+            if reconcile_original_artwork:self.record_artwork_attempt(ident,'complete')
+            return result
         except BaseException as error:
+            if reconcile_original_artwork and isinstance(error,Exception):
+                self.record_artwork_attempt(ident,'failed',error)
+                if self.artwork_source_failure(error):
+                    self.event('failed',error_type=type(error).__name__)
+                    raise
             with self._journal_lock:
                 if self._failure is None and str(error) != 'delivery-cancelled':
                     self._failure = error
@@ -256,6 +269,21 @@ class Delivery(FilePublisher):
             with self._journal_lock:
                 self._inflight.discard(ident)
             self._context.fields = {}
+
+    def record_artwork_attempt(self, ident, state, error=None):
+        path=self.docs/'artwork-attempts.json'
+        with self._journal_lock:
+            attempts=json.loads(path.read_text()) if path.exists() else {}
+            previous=attempts.get(ident,{})
+            record=dict(source_identity=ident,state=state,at=time.time(),
+                        failures=previous.get('failures',0)+(state=='failed'))
+            if error is not None:
+                allowed={'artwork-original-content-changed','delivery-identity-mismatch','disk-reserve',
+                         'no-audio-candidate','icloud-upload-timeout','source-size-budget-exceeded',
+                         'local-final-hash-mismatch','login-required','Safari-unavailable',
+                         'Safari-navigation-failed','lesson-page-identity-timeout','unsupported-player-frame'}
+                record['reason']=str(error) if str(error) in allowed else type(error).__name__
+            attempts[ident]=record;atomic_json(path,attempts)
 
     def recover_original_artwork(self, lesson, target):
         """Recover pre-policy originals before upgrading a confirmed receipt.
@@ -448,6 +476,7 @@ class Delivery(FilePublisher):
             raise ValueError('duplicate output paths')
         iterator = iter(enumerate(work, start_index))
         results = []
+        artwork_failures=False
         pool = ThreadPoolExecutor(max_workers=self.concurrency)
         pending = set()
         def submit():
@@ -468,8 +497,10 @@ class Delivery(FilePublisher):
                 for future in done:
                     try:
                         results.append(future.result())
-                    except BaseException:
-                        self.cancel()
+                    except BaseException as error:
+                        if reconcile_original_artwork and isinstance(error,Exception) and self.artwork_source_failure(error):
+                            artwork_failures=True
+                        else:self.cancel()
                 if not self._stop.is_set():
                     for _ in done:
                         submit()
@@ -484,6 +515,7 @@ class Delivery(FilePublisher):
             raise self._failure
         if self._stop.is_set():
             raise RuntimeError('delivery-cancelled')
+        if artwork_failures:raise RuntimeError('artwork-reconciliation-incomplete')
         return results
 
 

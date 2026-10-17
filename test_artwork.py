@@ -272,7 +272,7 @@ class ArtworkTests(unittest.TestCase):
         def wrong(candidate,path):path.write_bytes(b'wrong-source');return path
         with patch.object(pipe.adapter,'download',side_effect=wrong):
             with self.assertRaisesRegex(RuntimeError,'artwork-original-content-changed'):
-                delivery.run([(lesson,target)],reconcile_original_artwork=True)
+                delivery.process(lesson,target,reconcile_original_artwork=True)
         self.assertEqual(target.read_bytes(),before)
         self.assertEqual(delivery.journal[Pipeline.identity(lesson['url'])],old)
         self.assertTrue(any(p.read_bytes()==b'wrong-source' for p in pipe.root.rglob('source.mp3')))
@@ -296,8 +296,34 @@ class ArtworkTests(unittest.TestCase):
         delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0)
         with patch.object(pipe.adapter,'download') as download:
             with self.assertRaisesRegex(RuntimeError,'delivery-identity-mismatch'):
-                delivery.run([(lesson,target.with_name('other.m4a'))],reconcile_original_artwork=True)
+                delivery.process(lesson,target.with_name('other.m4a'),reconcile_original_artwork=True)
             download.assert_not_called()
+
+    def test_original_source_blocker_does_not_starve_another_lesson(self):
+        pipe,cloud,target,lesson,old=self.legacy_completed()
+        other={**lesson,'url':'https://test/other','title':'Other','stem':'other'}
+        other_target=target.with_name('other.m4a');shutil.copyfile(target,other_target)
+        delivery=Delivery(pipe.root,target.parent,cloud,pipe.adapter,reserve_bytes=0,upload_timeout=0,concurrency=2)
+        folder,other_final=delivery.paths(other)
+        other_receipt={**old,'title':other['title'],'source_identity':Pipeline.identity(other['url']),
+                       'cloud':str(other_target),'final':str(other_final),
+                       'original':str(folder/'originals/other.mp3'),
+                       'uploaded_mtime_ns':other_target.stat().st_mtime_ns}
+        delivery.save(other_receipt)
+        download=pipe.adapter.download
+        def resolve(l):
+            return [Candidate('https://cdn.test/'+l['title']+'.mp3','mp3')]
+        def fail_first(candidate,path):
+            if candidate.url.endswith('/Lesson.mp3'):path.write_bytes(b'changed-source');return path
+            return download(candidate,path)
+        with patch.object(pipe.adapter,'resolve',side_effect=resolve),patch.object(pipe.adapter,'download',side_effect=fail_first):
+            with self.assertRaisesRegex(RuntimeError,'artwork-reconciliation-incomplete'):
+                delivery.run([(lesson,target),(other,other_target)],reconcile_original_artwork=True)
+        attempts=json.loads((delivery.docs/'artwork-attempts.json').read_text())
+        self.assertEqual(attempts[Pipeline.identity(lesson['url'])]['reason'],'artwork-original-content-changed')
+        self.assertEqual(attempts[Pipeline.identity(other['url'])]['state'],'complete')
+        self.assertEqual(delivery.journal[Pipeline.identity(other['url'])]['artwork']['origin'],'embedded')
+        self.assertNotIn('artwork',delivery.journal[Pipeline.identity(lesson['url'])])
 
     def test_original_reconciliation_waits_for_native_upload_before_cleanup(self):
         pipe,cloud,target,lesson,old=self.legacy_completed()
