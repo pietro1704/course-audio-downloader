@@ -54,6 +54,36 @@ def select_rendition(master, text, audio_only=False):
     if urlsplit(selected).scheme!='https': raise RuntimeError('unsafe-player-media-url')
     return selected
 
+
+def shared_muxed_audio(master,text):
+    """Use less video only when every variant carries one declared audio rendition.
+
+    RFC 8216 section 4.3.4.2.1 places an AUDIO rendition without a URI in
+    every referencing video variant. Missing/ambiguous groups or different
+    audio codecs provide no such selection contract and retain the caller's
+    original source policy.
+    """
+    if not text.lstrip().startswith('#EXTM3U'):raise RuntimeError('invalid-player-playlist')
+    lines=[line.strip() for line in text.splitlines() if line.strip()]
+    groups=[attributes(line.split(':',1)[1]) for line in lines if line.startswith('#EXT-X-MEDIA:')]
+    groups=[group for group in groups if group.get('TYPE')=='AUDIO']
+    if len(groups)!=1 or groups[0].get('URI') or not groups[0].get('GROUP-ID'):return None
+    group=groups[0]['GROUP-ID'];variants=[];audio_codec=None
+    for i,line in enumerate(lines):
+        if not line.startswith('#EXT-X-STREAM-INF:'):continue
+        info=attributes(line.split(':',1)[1])
+        codecs=tuple(c for c in info.get('CODECS','').split(',') if c.startswith(('mp4a','ac-3','ec-3')))
+        if info.get('AUDIO')!=group or len(codecs)!=1:return None
+        if audio_codec is not None and codecs!=audio_codec:return None
+        audio_codec=codecs
+        try:bandwidth=int(info.get('BANDWIDTH','0'))
+        except ValueError:return None
+        if bandwidth<=0 or i+1>=len(lines) or lines[i+1].startswith('#'):return None
+        url=urljoin(master,lines[i+1])
+        if urlsplit(url).scheme!='https':raise RuntimeError('unsafe-player-media-url')
+        variants.append((bandwidth,url))
+    return min(variants,key=lambda item:item[0])[1] if variants else None
+
 def _player(frame, lesson_url, profile):
     from site_profile import player_fields
     fields=player_fields(frame,profile)

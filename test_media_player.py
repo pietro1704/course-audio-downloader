@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from pipeline import Candidate
 from browser_adapter import SafariAdapter
-from media_transport import select_rendition
+from media_transport import select_rendition,shared_muxed_audio
 from test_profiles import resolve_player,HTML_PLAYER
 
 FRAME='https://player.example.test/embed/12/lesson-uuid'
@@ -10,6 +10,32 @@ MASTER='https://media.example/lesson-uuid/playlist.m3u8?signature=PRIVATE'
 HTML='<media-player library-id="12" video-id="lesson-uuid" drm-version="0" content-src="'+MASTER+'"></media-player>'
 MUX='#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,CODECS="avc1.4d401e,mp4a.40.2"\n720p.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=200000,CODECS="avc1.4d4015,mp4a.40.2"\n240p.m3u8\n'
 class MediaPlayerTests(unittest.TestCase):
+    def shared_audio_master(self):
+        return ('#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="common",NAME="Audio",DEFAULT=YES\n'
+                '#EXT-X-STREAM-INF:BANDWIDTH=900000,CODECS="avc1.4d401e,mp4a.40.2",AUDIO="common"\nhigh.m3u8\n'
+                '#EXT-X-STREAM-INF:BANDWIDTH=180000,CODECS="avc1.4d4015,mp4a.40.2",AUDIO="common"\nlow.m3u8\n')
+
+    def test_one_shared_muxed_audio_rendition_uses_less_video(self):
+        self.assertEqual(shared_muxed_audio(MASTER,self.shared_audio_master()),'https://media.example/lesson-uuid/low.m3u8')
+        self.assertIsNone(select_rendition(MASTER,self.shared_audio_master(),audio_only=True))
+
+    def test_ambiguous_or_different_audio_tracks_keep_existing_policy(self):
+        master=self.shared_audio_master()
+        cases=[MUX,master.replace('AUDIO="common"','AUDIO="other"',1),
+               master.replace('mp4a.40.2','mp4a.40.5',1),
+               master.replace(',AUDIO="common"','',1),
+               master.replace('NAME="Audio"','NAME="Audio",URI="audio.m3u8"'),
+               master+'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="common",NAME="Another language"\n',
+               master.replace('BANDWIDTH=180000','BANDWIDTH=0')]
+        for text in cases:
+            with self.subTest(text=text):self.assertIsNone(shared_muxed_audio(MASTER,text))
+
+    def test_shared_audio_rejects_insecure_variant_and_invalid_playlist(self):
+        with self.assertRaisesRegex(RuntimeError,'unsafe-player-media-url'):
+            shared_muxed_audio(MASTER,self.shared_audio_master().replace('low.m3u8','http://cdn.test/low.m3u8?token=PRIVATE'))
+        with self.assertRaisesRegex(RuntimeError,'invalid-player-playlist'):
+            shared_muxed_audio(MASTER,'not a playlist')
+
     def test_mp3_precedes_player(self):
         page={'links':[{'url':'https://cdn.example/opaque','label':'Áudio da aula (mp3)'}],'frames':[FRAME]}
         self.assertEqual(SafariAdapter.candidates(page),[Candidate('https://cdn.example/opaque','mp3')])

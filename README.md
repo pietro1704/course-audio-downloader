@@ -19,6 +19,12 @@ Catalogues use `course-catalog/v1`, complete counts and lesson `title`, `url`, `
 
 Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedded-json`, `template-hls` or `extractor`. Selectors, title suffixes, identity expressions, player patterns and URL templates belong to the local profile. Treat profiles as trusted local code: identity expressions execute read-only JavaScript in Safari. Examples and contracts are documented in [docs/template-profile.md](docs/template-profile.md).
 
+Embedded profiles with `prefer_audio_rendition: true` prefer a dedicated audio
+playlist. If all video variants explicitly reference one URI-less AUDIO rendition
+and declare the same audio codec, resolution instead selects the variant with
+the least video bandwidth. Ambiguous groups, distinct audio codecs, or missing
+declarations retain the original master selection and source-quality policy.
+
 If a provider publishes equivalent route prefixes, a profile may declare
 `"url_path_prefix_aliases": {"/en-GB/": "/en-gb/"}`. Browser audio resolution and
 document discovery normalize only these explicit prefixes when comparing the
