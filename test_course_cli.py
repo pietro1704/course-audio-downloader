@@ -65,6 +65,20 @@ class CourseContractsTests(unittest.TestCase):
             self.assertEqual(main(args),0)
         self.assertEqual(delivery.call_args.kwargs['upload_timeout'],3600)
 
+    def test_audio_failure_status_retains_actionable_identity_code(self):
+        catalog,profile,_=self.inputs('identity-failure')
+        root=self.base/'identity-failure-work'
+        args=['--catalog',str(catalog),'--profile',str(profile),'--root',str(root),
+              '--destination',str(self.base/'cloud'),'--icloud-python','python']
+        with patch('course_cli.Delivery') as delivery,patch('course_cli.DocumentDelivery'),\
+             patch('course_cli.NativeCloud'),patch('course_cli.DocumentBrowser'),patch('course_cli.build_adapter'),\
+             contextlib.redirect_stdout(io.StringIO()):
+            delivery.return_value.journal={};delivery.return_value.completed_count.return_value=0
+            delivery.return_value.run.side_effect=RuntimeError('embedded-lesson-identity-timeout')
+            self.assertEqual(main(args),2)
+        status=json.loads((root/'Documentacao/delivery-status.json').read_text())
+        self.assertEqual(status['reason'],'embedded-lesson-identity-timeout')
+
     def test_original_artwork_mode_reaches_bounded_delivery_without_document_navigation(self):
         catalog,profile,_=self.inputs('artwork')
         args=['--catalog',str(catalog),'--profile',str(profile),'--root',str(self.base/'work'),

@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 import course_audio_bot as audio
 import artwork
+from transfer_errors import failure_reason
 
 PRESET = {"codec": "aac", "profile": "LC", "channels": 1, "sample_rate": 44100, "bitrate": 32000}
 
@@ -263,8 +264,8 @@ class Pipeline:
                     owners.discard(ident)
                     if not owners:
                         self._source_owners.pop(source_claimed, None)
-            reason = str(error) if str(error) in {'disk-reserve', 'duplicate-source-different-lesson', 'invalid-shared-source-permission', 'no-audio-candidate', 'output-validation-failed'} else type(error).__name__
-            record = {'status': 'failed', 'source_identity': ident, 'reason': reason, 'timings': timings}
+            record = {'status': 'failed', 'source_identity': ident, 'reason': failure_reason(error),
+                      'error_type': type(error).__name__, 'timings': timings}
             self.write(record)
             return record
         finally:
