@@ -93,7 +93,8 @@ class Delivery(FilePublisher):
                               'source-size-budget-exceeded','hls-source-budget-exceeded'}
 
     def __init__(self, root, destination, cloud, adapter=None, reserve_bytes=4 * 1024**3,
-                 upload_timeout=900, poll_seconds=3, event=None, concurrency=1):
+                 upload_timeout=900, poll_seconds=3, event=None, concurrency=1,
+                 max_concurrency=None,worker_limit=None,admission_poll_seconds=15):
         self.root = Path(root).resolve()
         self.destination = Path(destination).resolve()
         if self.destination == self.root or self.destination.is_relative_to(self.root):
@@ -109,6 +110,11 @@ class Delivery(FilePublisher):
         self._stop = threading.Event()
         self._failure = None
         self.concurrency = concurrency
+        self.max_concurrency=concurrency if max_concurrency is None else max_concurrency
+        if type(self.max_concurrency) is not int or not concurrency<=self.max_concurrency<=8:
+            raise ValueError('invalid-concurrency-limit')
+        self.worker_limit=worker_limit
+        self.admission_poll_seconds=admission_poll_seconds
         self.cloud, self.upload_timeout, self.poll_seconds = cloud, upload_timeout, poll_seconds
         self.event_callback = event or (lambda stage, **fields: None)
         self.adapter = ObservedAdapter(adapter or SafariAdapter(), self.event)
@@ -479,7 +485,7 @@ class Delivery(FilePublisher):
         iterator = iter(enumerate(work, start_index))
         results = []
         artwork_failures=False
-        pool = ThreadPoolExecutor(max_workers=self.concurrency)
+        pool = ThreadPoolExecutor(max_workers=self.max_concurrency)
         pending = set()
         def submit():
             if self._stop.is_set():
@@ -491,11 +497,20 @@ class Delivery(FilePublisher):
             kwargs={'reconcile_original_artwork':True} if reconcile_original_artwork else {}
             pending.add(pool.submit(self.process, lesson, target, index, **kwargs))
             return True
+        def capacity():
+            limit=self.worker_limit() if self.worker_limit else self.concurrency
+            if type(limit) is not int or not 1<=limit<=self.max_concurrency:
+                raise ValueError('invalid-worker-limit')
+            if limit!=self.concurrency:
+                self.concurrency=limit
+                self.event('running',concurrency=limit,requested_concurrency=self.max_concurrency)
+            return limit
         try:
-            for _ in range(self.concurrency):
+            for _ in range(capacity()):
                 submit()
             while pending:
-                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                done, pending = wait(pending,timeout=self.admission_poll_seconds if self.worker_limit else None,
+                                     return_when=FIRST_COMPLETED)
                 for future in done:
                     try:
                         results.append(future.result())
@@ -504,8 +519,8 @@ class Delivery(FilePublisher):
                             artwork_failures=True
                         else:self.cancel()
                 if not self._stop.is_set():
-                    for _ in done:
-                        submit()
+                    limit=capacity()
+                    while len(pending)<limit and submit():pass
         except BaseException:
             self.cancel()
             for future in pending:
@@ -557,6 +572,7 @@ class Progress:
                 self.run_stage = stage
             if 'delivered' in fields:
                 self.current['delivered'] = max(self.current['delivered'], fields['delivered'])
+            if 'concurrency' in fields:self.current['concurrency']=fields['concurrency']
             slow_after = {'resolve': 90, 'download': 180, 'encode': 180,
                           'validate': 60, 'validate-existing': 60, 'wait-for-upload': 180}
             active = []
