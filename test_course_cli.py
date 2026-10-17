@@ -65,6 +65,18 @@ class CourseContractsTests(unittest.TestCase):
             self.assertEqual(main(args),0)
         self.assertEqual(delivery.call_args.kwargs['upload_timeout'],3600)
 
+    def test_original_artwork_mode_reaches_bounded_delivery_without_document_navigation(self):
+        catalog,profile,_=self.inputs('artwork')
+        args=['--catalog',str(catalog),'--profile',str(profile),'--root',str(self.base/'work'),
+              '--destination',str(self.base/'cloud'),'--icloud-python','python','--reconcile-original-artwork']
+        with patch('course_cli.Delivery') as delivery,patch('course_cli.DocumentDelivery') as documents,\
+             patch('course_cli.NativeCloud'),patch('course_cli.DocumentBrowser'),patch('course_cli.build_adapter'),\
+             contextlib.redirect_stdout(io.StringIO()):
+            delivery.return_value.completed_count.return_value=0
+            self.assertEqual(main(args),0)
+            self.assertTrue(delivery.return_value.run.call_args.kwargs['reconcile_original_artwork'])
+            documents.return_value.run.assert_not_called()
+
     def test_upload_timeout_rejects_nonpositive_nonfinite_and_over_bound_values(self):
         catalog, profile, _ = self.inputs('bad-timeout')
         args = ['--catalog',str(catalog),'--profile',str(profile),'--root',str(self.base/'work'),

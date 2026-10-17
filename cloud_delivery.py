@@ -228,7 +228,7 @@ class Delivery(FilePublisher):
                 receipt['freed_bytes'] = receipt.get('freed_bytes', 0) + size
                 self.save(receipt)
 
-    def process(self, lesson, target, index=None):
+    def process(self, lesson, target, index=None, *, reconcile_original_artwork=False):
         ident = Pipeline.identity(lesson['url'])
         with self._journal_lock:
             if ident in self._inflight:
@@ -241,6 +241,8 @@ class Delivery(FilePublisher):
             self.event('start-lesson')
             if self._stop.is_set():
                 raise RuntimeError('delivery-cancelled')
+            if reconcile_original_artwork:
+                self.recover_original_artwork(lesson, target)
             return self._process(lesson, target)
         except BaseException as error:
             with self._journal_lock:
@@ -254,6 +256,58 @@ class Delivery(FilePublisher):
             with self._journal_lock:
                 self._inflight.discard(ident)
             self._context.fields = {}
+
+    def recover_original_artwork(self, lesson, target):
+        """Recover pre-policy originals before upgrading a confirmed receipt.
+
+        Existing source hashes remain authoritative. Never substitute a new
+        recording, re-encode the delivered audio, or discard failed downloads.
+        The normal prepared-artwork transaction handles publication and cleanup.
+        """
+        ident=Pipeline.identity(lesson['url'])
+        with self._journal_lock:
+            receipt=dict(self.journal[ident])
+        self.check_receipt(receipt,lesson,Path(target))
+        if receipt.get('artwork') or receipt.get('artwork_update') or receipt['state']=='prepared':return
+        if receipt['state'] not in {'complete','uploaded'}:raise RuntimeError('invalid-artwork-recovery-state')
+        self.confirm(receipt)
+        original,final=Path(receipt['original']),Path(receipt['final'])
+        maximum=getattr(self.adapter.adapter,'max_source_bytes',512*1024**2)
+        budget=maximum+3*receipt['size']+16*1024**2
+        if not self.pipeline._reserve(budget):raise RuntimeError('disk-reserve')
+        try:
+            folder=final.parent/'.staging'/('recover-artwork-'+uuid.uuid4().hex)
+            folder.mkdir(parents=True)
+            if not original.exists():
+                with self.pipeline._resolve_lock:
+                    if self._stop.is_set():raise RuntimeError('delivery-cancelled')
+                    candidates=self.pipeline.rank(self.adapter.resolve(lesson))
+                if not candidates:raise RuntimeError('no-audio-candidate')
+                got=Path(self.adapter.download(candidates[0],folder/('source'+original.suffix)))
+                if got.stat().st_size>maximum:raise RuntimeError('source-size-budget-exceeded')
+                if Pipeline.sha256(got)!=receipt['source_hash']:
+                    raise RuntimeError('artwork-original-content-changed')
+                if self._stop.is_set():raise RuntimeError('delivery-cancelled')
+                original.parent.mkdir(parents=True,exist_ok=True)
+                os.link(got,original);got.unlink()
+            if Pipeline.sha256(original)!=receipt['source_hash']:
+                raise RuntimeError('artwork-original-content-changed')
+            if not final.exists():
+                staged=folder/'previous.m4a'
+                with Path(target).open('rb') as source,staged.open('xb') as output:
+                    shutil.copyfileobj(source,output);output.flush();os.fsync(output.fileno())
+                if Pipeline.sha256(staged)!=receipt['final_hash']:
+                    raise RuntimeError('local-final-hash-mismatch')
+                os.link(staged,final);staged.unlink()
+            if Pipeline.sha256(final)!=receipt['final_hash']:
+                raise RuntimeError('local-final-hash-mismatch')
+            if self._stop.is_set():raise RuntimeError('delivery-cancelled')
+            receipt['state']='prepared';receipt.pop('uploaded_mtime_ns',None)
+            receipt['original_artwork_recovered_at']=time.time()
+            self.save(receipt)
+            folder.rmdir()
+        finally:
+            with self.pipeline._state_lock:self.pipeline._reserved-=budget
 
     def _process(self, lesson, target):
         start = time.monotonic()
@@ -383,7 +437,7 @@ class Delivery(FilePublisher):
         self.save(receipt)
         shutil.rmtree(staged.parent)
 
-    def run(self, work, start_index=0):
+    def run(self, work, start_index=0, *, reconcile_original_artwork=False):
         work = list(work)
         identities = [Pipeline.identity(lesson['url']) for lesson, _ in work]
         if len(set(identities)) != len(identities):
@@ -403,7 +457,8 @@ class Delivery(FilePublisher):
                 index, (lesson, target) = next(iterator)
             except StopIteration:
                 return False
-            pending.add(pool.submit(self.process, lesson, target, index))
+            kwargs={'reconcile_original_artwork':True} if reconcile_original_artwork else {}
+            pending.add(pool.submit(self.process, lesson, target, index, **kwargs))
             return True
         try:
             for _ in range(self.concurrency):

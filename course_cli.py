@@ -86,9 +86,12 @@ def main(argv=None):
                    help='Maximum seconds to wait for iCloud upload confirmation (1–21600)')
     p.add_argument('--dry-run',action='store_true');p.add_argument('--probe',type=int,default=0)
     p.add_argument('--documents-only',action='store_true',help='Backfill original lesson documents without audio processing')
+    p.add_argument('--reconcile-original-artwork',action='store_true',
+                   help='Recover hash-matching originals for completed pre-policy artwork receipts')
     p.add_argument('--refresh-completed-artwork',action='store_true',
                    help='Explicitly retry missing covers on completed native uploads before delivery')
     args=p.parse_args(argv)
+    if args.documents_only and args.reconcile_original_artwork:p.error('incompatible delivery modes')
     if (args.start<0 or (args.limit is not None and args.limit<1) or args.min_free_gib<4
             or args.probe<0 or not math.isfinite(args.upload_timeout)
             or not 1<=args.upload_timeout<=21600):
@@ -140,6 +143,10 @@ def main(argv=None):
             while not stopped.wait(15):progress.event(heartbeat=True)
         worker=threading.Thread(target=heartbeat,daemon=True);worker.start()
         try:
+            if args.reconcile_original_artwork:
+                progress.event('running')
+                delivery.run(work,start_index=args.start,reconcile_original_artwork=True)
+                progress.event('finished',delivered=delivery.completed_count());return 0
             for lesson,target in work:
                 receipt=delivery.journal.get(Pipeline.identity(lesson['url']),{})
                 if (args.refresh_completed_artwork and receipt.get('state')=='complete'

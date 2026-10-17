@@ -40,6 +40,15 @@ failure or cancellation cannot remove another lesson's source ownership.
 
 Delivery uses `Documentacao/delivery.lock`, `delivery-journal.json`, `delivery-status.json` and `pipeline-manifest.jsonl`. A verified native iCloud upload is required before deleting the matching original and evicting the local cloud cache. Prepared receipts resume without another download. A completed no-cover receipt does not repeat its prior optional artwork lookup on restart; use `--refresh-completed-artwork` explicitly to retry missing covers. First-pass embedded artwork and matching-video fallback always run during conversion. Cancellation drains submitted tasks and preserves sources. See [delivery details](docs/sequential-icloud.md).
 
+For older receipts without an artwork policy result, `--reconcile-original-artwork`
+recovers the original from the identity-checked lesson and requires its historical
+SHA-256 before restoring attached artwork. Missing original artwork falls back to
+the matching video thumbnail, then records `origin: none`. This mode preserves
+the encoded audio stream, uses bounded concurrency with serialized navigation,
+and resumes the existing artwork publication transaction. Changed source bytes
+stop safely, preserving the failed download and existing cloud audio. Local
+sources remain until native upload confirmation, then the cloud cache is evicted.
+
 Run the same regression gate as CI (Node 22+ is needed for generated browser-JavaScript contract tests):
 
 ```sh
