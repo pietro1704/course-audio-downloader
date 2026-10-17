@@ -11,10 +11,11 @@ extractor = ["yt-dlp>=2026.8.19"]
 course-audio-bot = "course_audio_bot:main"
 course-deliver = "course_cli:main"
 course-supervise = "queue_supervisor:main"
+course-supervise-jobs = "job_supervisor:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "file_delivery", "documents", "document_browser"]
+py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "file_delivery", "documents", "document_browser"]
 
 [build-system]
 requires = ["setuptools>=68"]
