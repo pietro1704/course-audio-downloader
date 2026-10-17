@@ -3,7 +3,8 @@ from __future__ import annotations
 import json,math,re,subprocess,time
 from urllib.parse import urlsplit
 from pipeline import Candidate
-from browser_adapter import SafariAdapter,normalize_title
+from browser_adapter import SafariAdapter,normalize_title,canonical
+from site_profile import normalized_url_path
 import course_audio_bot as audio
 
 
@@ -64,16 +65,18 @@ class EmbeddedAdapter(SafariAdapter):
 
     def resolve(self,lesson):
         self._check_url(lesson['url'])
-        expected=self._title(lesson.get('title',''));wanted=urlsplit(lesson['url']).path.rstrip('/')
+        expected=self._title(lesson.get('title',''))
+        wanted=normalized_url_path(urlsplit(lesson['url']).path,self.profile).rstrip('/')
         self._eval_embedded(lesson['url']);last,stable=None,0;deadline=time.monotonic()+self.timeout
         while time.monotonic()<deadline:
             try:page=self._eval_embedded()
             except (ValueError,RuntimeError,subprocess.TimeoutExpired):time.sleep(.5);continue
             frames=page.get('iframes',[]);src=frames[0] if frames else '';player=self.profile.get('player',{})
             allowed=(urlsplit(src).scheme=='https' and re.fullmatch(player.get('host_pattern',r'(?!)'),urlsplit(src).hostname or ''))
-            matches=(page.get('ready')=='complete' and urlsplit(page.get('url','')).path.rstrip('/')==wanted and
+            matches=(page.get('ready')=='complete' and canonical(page.get('url',''),self.profile)==canonical(lesson['url'],self.profile) and
                      self._title(page.get('title',''))==expected and allowed and
-                     any(a.get('path','').rstrip('/')==wanted and self._title(a.get('title',''))==expected for a in page.get('active',[])))
+                     any(normalized_url_path(a.get('path',''),self.profile).rstrip('/')==wanted and
+                         self._title(a.get('title',''))==expected for a in page.get('active',[])))
             key=(wanted,self._title(page.get('title','')),urlsplit(src).path)
             if self._last_media and self._last_media[0]!=wanted and self._last_media[1]==urlsplit(src).path:matches=False
             stable=stable+1 if matches and key==last else 0;last=key
@@ -89,7 +92,7 @@ class EmbeddedAdapter(SafariAdapter):
                 frame=urlsplit(src)
                 origin=frame.scheme+'://'+(frame.hostname or '')
                 if frame.port and frame.port!=443:origin+=':'+str(frame.port)
-                self._link_context=dict(page_path=wanted,player=origin+frame.path)
+                self._link_context=dict(page_path=urlsplit(page['url']).path.rstrip('/'),player=origin+frame.path)
                 return [candidate]
             time.sleep(.5)
         raise RuntimeError('embedded-lesson-identity-timeout')
