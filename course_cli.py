@@ -26,6 +26,15 @@ def build_adapter(profile,encoder='aac_at'):
     return cls(profile=profile,encoder=encoder)
 
 
+def admitted_workers(root,requested,reserve_bytes):
+    # Use the pipeline's 512 MiB source budget, leaving room for native cloud
+    # metadata/copies and other activity before submitting parallel work.
+    existing=Path(root).resolve()
+    while not existing.exists():existing=existing.parent
+    available=shutil.disk_usage(existing).free-reserve_bytes-256*1024**2
+    return min(requested,max(1,available//(512*1024**2)))
+
+
 def preflight(lessons,profile,root,destination,cloud):
     root,destination=Path(root).resolve(),Path(destination).resolve()
     if destination==root or destination.is_relative_to(root) or root.is_relative_to(destination):
@@ -121,6 +130,11 @@ def main(argv=None):
                     concurrency=args.concurrency,lessons=rows)
         report['document_lessons']=document_rows
         print(json.dumps(report,ensure_ascii=False));return 0
+    requested_concurrency=args.concurrency
+    args.concurrency=admitted_workers(root,args.concurrency,int(args.min_free_gib*1024**3))
+    if args.concurrency!=requested_concurrency:
+        print(json.dumps(dict(event='space-aware-admission',requested=requested_concurrency,
+                              admitted=args.concurrency,reserve_gib=args.min_free_gib)),flush=True)
     documents=DocumentDelivery(root,destination,NativeCloud(args.icloud_python),
         adapter=DocumentBrowser(profile=profile),concurrency=args.concurrency,
         reserve_bytes=int(args.min_free_gib*1024**3))
@@ -134,7 +148,8 @@ def main(argv=None):
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
             print(json.dumps({'reason':'another-run-is-active'}));return 2
-        progress=Progress(root,selected=len(lessons),concurrency=args.concurrency)
+        progress=Progress(root,selected=len(lessons),concurrency=args.concurrency,
+                          requested_concurrency=requested_concurrency)
         delivery=Delivery(root,destination,NativeCloud(args.icloud_python),adapter=build_adapter(profile,args.encoder),
                           reserve_bytes=int(args.min_free_gib*1024**3),concurrency=args.concurrency,
                           upload_timeout=args.upload_timeout,event=progress.event)
