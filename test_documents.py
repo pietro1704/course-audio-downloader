@@ -1,6 +1,7 @@
 """Original documents exercise the real streaming, receipt and publication stages."""
 import io
 import json
+import hashlib
 from email.message import Message
 from pathlib import Path
 import tempfile
@@ -30,6 +31,58 @@ class DocumentsTests(unittest.TestCase):
             reserve_bytes=0,upload_timeout=0,poll_seconds=0)
     def transfer(self):
         with patch('documents.urllib.request.urlopen',side_effect=lambda *a,**k:Response()):return self.d.run([self.lesson])
+
+    def shared_resources(self):
+        first={**self.resource,'shared_path_with':['other-file'],'shared_file_sha256':hashlib.sha256(PDF).hexdigest()}
+        second={**first,'id':'other-file','url':'https://assets.example.test/other?token=private2',
+                'shared_path_with':[first['id']]}
+        return [first,second]
+
+    def test_declared_identical_documents_preserve_both_identities_and_original_filename(self):
+        resources=self.shared_resources();self.adapter.inventory.return_value=resources
+        report=self.transfer()
+        self.assertEqual((report['documents'],report['complete']),(2,2))
+        receipts=[self.d.journal[self.d.identity(self.lesson,r)] for r in resources]
+        self.assertEqual(receipts[0]['cloud'],receipts[1]['cloud'])
+        self.assertEqual(Path(receipts[0]['cloud']).read_bytes(),PDF)
+        self.assertFalse(Path(receipts[0]['final']).exists())
+        self.assertEqual(len(list(self.d.destination.rglob('*.pdf'))),1)
+        self.assertEqual(receipts[0]['shared_resource_ids'],[receipts[1]['resource_id']])
+        with patch('documents.urllib.request.urlopen',side_effect=AssertionError('repeat download')):
+            self.assertTrue(self.d.run([self.lesson])['ok'])
+        self.assertNotIn('token=private',json.dumps(self.d.journal))
+        changed=dict(resources[0]);changed.pop('shared_path_with');changed.pop('shared_file_sha256')
+        with self.assertRaisesRegex(ValueError,'identity-mismatch'):self.d.one(self.lesson,changed)
+
+    def test_shared_document_permission_does_not_allow_changed_bytes_or_replace_valid_cloud_file(self):
+        resources=self.shared_resources();self.adapter.inventory.return_value=resources
+        changed=PDF.replace(b'original',b'changed!')
+        def response(request,**kwargs):return Response(PDF if request.full_url==resources[0]['url'] else changed)
+        with patch('documents.urllib.request.urlopen',side_effect=response),self.assertRaisesRegex(RuntimeError,'incomplete'):
+            self.d.run([self.lesson])
+        receipt=self.d.journal[self.d.identity(self.lesson,resources[0])]
+        self.assertEqual(Path(receipt['cloud']).read_bytes(),PDF)
+        self.assertNotIn(self.d.identity(self.lesson,resources[1]),self.d.journal)
+        self.assertTrue(any(p.read_bytes()==changed for p in (self.d.root/'.document-staging').glob('*.partial')))
+
+    def test_shared_document_permissions_are_reciprocal_and_checksum_bound_before_download(self):
+        for kind in ['unknown-peer','different-hash','different-name','no-checksum']:
+            resources=self.shared_resources()
+            if kind=='unknown-peer':resources[1]['shared_path_with']=['foreign-id']
+            if kind=='different-hash':resources[1]['shared_file_sha256']='0'*64
+            if kind=='different-name':resources[1]['name']='other.pdf'
+            if kind=='no-checksum':resources[1].pop('shared_file_sha256')
+            self.adapter.inventory.return_value=resources
+            with self.subTest(kind=kind),patch('documents.urllib.request.urlopen') as http,\
+                 self.assertRaisesRegex(RuntimeError,'incomplete'):
+                self.d.run([self.lesson])
+            http.assert_not_called();self.assertEqual(self.d.journal,{})
+
+    def test_cancelled_shared_document_never_downloads_or_removes_a_source(self):
+        self.d.cancel()
+        with patch('documents.urllib.request.urlopen') as http, self.assertRaisesRegex(RuntimeError,'cancelled'):
+            self.d.one(self.lesson,self.shared_resources()[0])
+        http.assert_not_called();self.assertFalse(self.d.journal)
     def test_two_unrelated_courses_exact_bytes_names_and_restart(self):
         for name in ('alpha','omega'):
             self.lesson['url']='https://'+name+'.example.test/lesson/1';self.lesson['site_path'][0]=name

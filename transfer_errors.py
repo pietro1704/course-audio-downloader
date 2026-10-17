@@ -3,6 +3,7 @@ import errno
 import subprocess
 
 KNOWN_FAILURES=frozenset("""
+invalid-shared-document-permission
 Safari-lesson-identity-timeout Safari-navigation-failed Safari-unavailable
 ambiguous-document-identity-or-path ambiguous-external-media another-document-run-is-active
 artwork-original-content-changed artwork-processing-failed artwork-reconciliation-incomplete
