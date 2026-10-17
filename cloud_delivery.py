@@ -16,7 +16,7 @@ from pathlib import Path
 
 import course_audio_bot as audio
 import artwork
-from transfer_errors import failure_reason
+from transfer_errors import failure_reason,KNOWN_FAILURES
 from icloud_bridge import uploaded
 from file_delivery import FilePublisher
 from pipeline import Pipeline, PRESET
@@ -207,7 +207,8 @@ class Delivery(FilePublisher):
         else:
             record = self.pipeline.one(lesson)
             if record['status'] != 'ok':
-                raise RuntimeError(record.get('reason','lesson-pipeline-failed'))
+                reason=record.get('reason')
+                raise RuntimeError(reason if reason in KNOWN_FAILURES else 'lesson-pipeline-failed')
         receipt = {'schema': 1, 'state': 'prepared', 'source_identity': ident,
                    'title': lesson['title'], 'params': PRESET, 'cloud': str(target),
                    **{key: record[key] for key in ('original', 'final', 'source_hash', 'final_hash')},
