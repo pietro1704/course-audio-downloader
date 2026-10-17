@@ -6,12 +6,12 @@ on:
 
 jobs:
   native-cloud:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Native Foundation boundary
-        run: uv run --python 3.11 --with pyobjc-framework-Cocoa python -m unittest -v test_icloud_bridge test_native_cloud
+      - name: Native Foundation boundary and bounded operations
+        run: uv run --python 3.11 --with pyobjc-framework-Cocoa python -m unittest -v test_icloud_bridge test_native_cloud test_bounded_actions
   test:
     runs-on: ubuntu-latest
     steps:
