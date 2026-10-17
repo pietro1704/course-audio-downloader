@@ -396,17 +396,46 @@ class Delivery(FilePublisher):
                    delivered=self.completed_count())
         return receipt
 
-    def refresh_completed_artwork(self, lesson, target):
-        """Explicitly retry missing artwork on a confirmed, already cleaned delivery."""
+    def refresh_completed_artwork(self, lesson, target, *, allow_unavailable_original=False):
+        """Retry covers without replacing an already confirmed audio recording.
+
+        Legacy receipts require an explicit opt-in and a recorded failed source
+        hash check before falling back to the delivered audio and video thumbnail.
+        The failed download and historical source hash remain untouched.
+        """
+        if not isinstance(allow_unavailable_original, bool):
+            raise ValueError('allow_unavailable_original must be a boolean')
         ident = Pipeline.identity(lesson['url'])
         receipt = dict(self.journal[ident])
         target = Path(target)
         self.check_receipt(receipt, lesson, target)
+        if self._stop.is_set():
+            raise RuntimeError('delivery-cancelled')
         if receipt.get('artwork_update'):
-            return self.process(lesson, target)
-        if receipt['state'] != 'complete' or receipt.get('artwork', {}).get('origin') != 'none':
+            result = self.process(lesson, target)
+            if result.get('original_artwork_unavailable'):
+                self.record_artwork_attempt(ident, 'complete')
+            return result
+        unavailable = None
+        if receipt['state'] != 'complete':
+            raise RuntimeError('artwork-refresh-not-applicable')
+        if not receipt.get('artwork') and allow_unavailable_original:
+            attempts_path = self.docs / 'artwork-attempts.json'
+            with self._journal_lock:
+                attempts = json.loads(attempts_path.read_text()) if attempts_path.exists() else {}
+            attempt = attempts.get(ident, {})
+            if (attempt.get('source_identity') != ident or attempt.get('state') != 'failed'
+                    or attempt.get('reason') != 'artwork-original-content-changed'):
+                raise RuntimeError('original-artwork-unavailability-not-recorded')
+            if Path(receipt['original']).exists():
+                raise RuntimeError('original-artwork-source-still-available')
+            unavailable = dict(reason=attempt['reason'], at=time.time(),
+                               source_hash=receipt['source_hash'], failed_attempt=dict(attempt))
+        elif receipt.get('artwork', {}).get('origin') != 'none':
             raise RuntimeError('artwork-refresh-not-applicable')
         self.confirm(receipt)
+        if self._stop.is_set():
+            raise RuntimeError('delivery-cancelled')
         final = Path(receipt['final'])
         if not final.exists():
             if shutil.disk_usage(self.root).free - 3 * receipt['size'] - 16 * 1024**2 < self.reserve_bytes:
@@ -418,8 +447,17 @@ class Delivery(FilePublisher):
                 os.fsync(output.fileno())
         if Pipeline.sha256(final) != receipt['final_hash']:
             raise RuntimeError('local-final-hash-mismatch')
+        if self._stop.is_set():
+            raise RuntimeError('delivery-cancelled')
+        if unavailable is not None:
+            receipt['original_artwork_unavailable'] = unavailable
+            receipt['artwork'] = dict(version=1, origin='none')
+            self.save(receipt)
         self.upgrade_pending_artwork(receipt, lesson, completed=True)
-        return self.process(lesson, target)
+        result = self.process(lesson, target)
+        if result.get('original_artwork_unavailable'):
+            self.record_artwork_attempt(ident, 'complete')
+        return result
 
     def upgrade_pending_artwork(self, receipt, lesson, completed=False):
         """Resume pre-policy pending deliveries, preserving audio and crash recovery."""

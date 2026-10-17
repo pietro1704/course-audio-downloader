@@ -72,6 +72,16 @@ Per-lesson source blockers are recorded in `artwork-attempts.json` while other
 lessons continue; cloud, disk and browser failures still stop the lane for bounded
 supervisor recovery. Any unresolved artwork blocker makes the run fail.
 
+For a legacy delivery whose original cannot be recovered with its historical hash,
+an operator can explicitly call
+`Delivery.refresh_completed_artwork(..., allow_unavailable_original=True)`.
+This requires a matching recorded `artwork-original-content-changed` failure,
+an absent original and a confirmed cloud delivery. It preserves the failed source
+and historical hash, records the unavailability, and tries the matching video
+thumbnail on the existing audio without downloading or re-encoding a replacement.
+No available thumbnail leaves a recorded no-cover result. Default reconciliation
+continues to reject changed source bytes.
+
 Run the same regression gate as CI (Node 22+ is needed for generated browser-JavaScript contract tests):
 
 ```sh
