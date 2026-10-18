@@ -126,6 +126,13 @@ ficam em `curso/módulo/aula/nome original`, sem conversão. A limpeza local exi
 confirmação nativa do iCloud e comparação dos bytes. O diário de documentos é
 separado do diário de áudio e permite retomar uma publicação interrompida.
 
+`Documentacao/documents-failures.json` registra falhas por identidade de aula e
+recurso, com nome, código HTTP quando disponível, número de tentativas e indicação
+de falha recuperável. URLs assinadas e respostas do servidor não entram no registro.
+Uma retomada bem-sucedida marca a falha como resolvida somente após confirmar o
+upload e concluir a limpeza local. Cancelamento e identidade inválida não criam
+impedimentos de download; os limites de novas tentativas continuam no supervisor.
+
 Use `--documents-only` para preencher os anexos sem baixar ou converter áudio.
 `--documents-only --dry-run` valida as transações existentes sem criar arquivos;
 `--probe N` também visita N aulas para conferir o inventário, sem baixar anexos.

@@ -4,14 +4,15 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 from unittest.mock import patch
-from test_documents import DocumentsTests, Response, PDF
+from test_documents import Response, PDF
+import test_documents as fixtures
 from documents import DocumentDelivery
 from pipeline import Pipeline
 
 
 class DocumentFailureTests(unittest.TestCase):
-    setUp = DocumentsTests.setUp
-    transfer = DocumentsTests.transfer
+    setUp = fixtures.DocumentsTests.setUp
+    transfer = fixtures.DocumentsTests.transfer
 
     def records(self):
         path = self.d.docs / 'documents-failures.json'
