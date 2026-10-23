@@ -12,6 +12,7 @@ import threading
 import time
 from urllib.parse import unquote, urlsplit
 import urllib.request
+import urllib.error
 import unicodedata
 import uuid
 import zipfile
@@ -23,6 +24,13 @@ from pipeline import Pipeline
 from transfer_errors import failure_reason
 
 MEDIA_SUFFIXES = {'.mp3','.m4a','.aac','.wav','.ogg','.opus','.mp4','.mkv','.webm','.m3u8'}
+
+
+class DocumentHTTPError(RuntimeError):
+    """Keep a numeric HTTP status without retaining signed URLs or response bodies."""
+    def __init__(self, status):
+        self.http_status = status if type(status) is int and 400 <= status < 600 else None
+        super().__init__(f'document-http-{status}' if self.http_status else 'document-http-error')
 
 
 def document_resource(raw):
@@ -129,8 +137,10 @@ class DocumentDelivery:
         if self.docs.resolve()!=self.docs:raise ValueError('unsafe-document-path')
         self.journal_path=self.docs/'documents-journal.json'
         self.pages_path=self.docs/'documents-pages.json'
+        self.failure_path=self.docs/'documents-failures.json'
         self.journal=json.loads(self.journal_path.read_text()) if self.journal_path.exists() else {}
         self.pages=json.loads(self.pages_path.read_text()) if self.pages_path.exists() else {}
+        self.failure_records=json.loads(self.failure_path.read_text()) if self.failure_path.exists() else {}
         self.lock=threading.RLock();self.stop=self.publisher._stop
         self._shared_path_locks={}
         self.event=event or (lambda *args,**kwargs:None)
@@ -153,6 +163,30 @@ class DocumentDelivery:
 
     def identity(self,lesson,resource):
         return Pipeline.identity(lesson['url'])+':'+hashlib.sha256(resource['id'].encode()).hexdigest()
+
+    def record_failure(self, lesson, resource, error):
+        ident=self.identity(lesson,resource)
+        reason=failure_reason(error);status=getattr(error,'http_status',None)
+        retryable=(status in {408,425,429} or (status is not None and status>=500)
+                   or reason in {'document-download-failed','timeout-expired','disk-full','disk-reserve',
+                                 'icloud-upload-timeout','icloud-native-query-failed','icloud-bridge-unavailable'})
+        with self.lock:
+            old=self.failure_records.get(ident,{})
+            record=dict(identity=ident,source_identity=Pipeline.identity(lesson['url']),
+                        resource_id=hashlib.sha256(resource['id'].encode()).hexdigest(),
+                        name=resource.get('name'),state='failed',reason=reason,retryable=retryable,
+                        attempts=old.get('attempts',0)+1,first_failed_at=old.get('first_failed_at',time.time()),
+                        last_failed_at=time.time())
+            if status is not None:record['http_status']=status
+            self.failure_records[ident]=record
+            atomic_json(self.failure_path,self.failure_records)
+
+    def resolve_failure(self, lesson, resource):
+        ident=self.identity(lesson,resource)
+        with self.lock:
+            if ident in self.failure_records and self.failure_records[ident]['state']!='resolved':
+                self.failure_records[ident].update(state='resolved',resolved_at=time.time())
+                atomic_json(self.failure_path,self.failure_records)
 
     def paths(self,lesson,name):
         parts=path_parts(lesson['site_path'])+[path_parts(['resource',name])[-1]]
@@ -245,6 +279,8 @@ class DocumentDelivery:
                 receipt['shared_resource_ids']=sorted(hashlib.sha256(p.encode()).hexdigest() for p in resource['shared_path_with'])
             return receipt
         except (KeyboardInterrupt,SystemExit):raise
+        except urllib.error.HTTPError as error:
+            raise DocumentHTTPError(error.code) from None
         except Exception as error:
             allowed={'document-cancelled','document-size-budget-exceeded','disk-reserve','document-size-mismatch',
                 'invalid-document-format','document-login-or-html-response','document-is-media',
@@ -254,14 +290,21 @@ class DocumentDelivery:
 
     def one(self,lesson,resource):
         if self.stop.is_set():raise RuntimeError('document-cancelled')
-        if resource.get('shared_path_with'):
-            resource=document_resource(resource)
-            key=str(self.paths(lesson,resource['name'])[1])
-            with self.lock:path_lock=self._shared_path_locks.setdefault(key,threading.Lock())
-            with path_lock:
-                if self.stop.is_set():raise RuntimeError('document-cancelled')
-                return self._one(lesson,resource)
-        return self._one(lesson,resource)
+        try:
+            if resource.get('shared_path_with'):
+                resource=document_resource(resource)
+                key=str(self.paths(lesson,resource['name'])[1])
+                with self.lock:path_lock=self._shared_path_locks.setdefault(key,threading.Lock())
+                with path_lock:
+                    if self.stop.is_set():raise RuntimeError('document-cancelled')
+                    result=self._one(lesson,resource)
+            else:result=self._one(lesson,resource)
+        except ValueError:raise  # Invalid caller/receipt identity is not a failed source download.
+        except Exception as error:
+            if str(error)!='document-cancelled':self.record_failure(lesson,resource,error)
+            raise
+        self.resolve_failure(lesson,resource)
+        return result
 
     def _one(self,lesson,resource):
         self.status('delivering',title=lesson['title'])
@@ -307,6 +350,7 @@ class DocumentDelivery:
             # A separate backfill may have finished since this object was constructed.
             self.journal=json.loads(self.journal_path.read_text()) if self.journal_path.exists() else {}
             self.pages=json.loads(self.pages_path.read_text()) if self.pages_path.exists() else {}
+            self.failure_records=json.loads(self.failure_path.read_text()) if self.failure_path.exists() else {}
             self.status('starting')
             with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
                 try:

@@ -28,12 +28,13 @@ class Candidate:
 
 class Pipeline:
     def __init__(self, root, adapter, concurrency=2, reserve_bytes=4*1024**3,
-                 task_budget_bytes=128*1024**2):
+                 task_budget_bytes=128*1024**2, silence=None):
         if not 1 <= concurrency <= 8:
             raise ValueError("concurrency must be between 1 and 8")
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.adapter = adapter
+        self.silence = silence
         self.concurrency = concurrency
         self.reserve_bytes = reserve_bytes
         self.task_budget_bytes = task_budget_bytes
@@ -129,7 +130,8 @@ class Pipeline:
         return folder, stem
 
     def _resume(self, old, lesson):
-        if not old or old.get('status') != 'ok' or old.get('params') != PRESET:
+        if (not old or old.get('status') != 'ok' or old.get('params') != PRESET
+                or old.get('silence_identity') != (self.silence.identity if self.silence else None)):
             return False
         if old.get('validation_version') != 2 or not old.get('provider_identity_verified'):
             return False
@@ -155,6 +157,8 @@ class Pipeline:
             old = self._records.get(ident)
         if self._resume(old, lesson):
             return {**old, 'resume': True}
+        if old and old.get('status') == 'ok' and old.get('silence_identity') != (self.silence.identity if self.silence else None):
+            return {'status': 'failed', 'reason': 'silence-profile-mismatch', 'source_identity': ident}
         if self._stop.is_set():
             return {'status': 'cancelled', 'source_identity': ident}
         budget = self.task_budget_bytes
@@ -221,14 +225,34 @@ class Pipeline:
                 budget += extra
             encoded = work / 'encoded.m4a'
             t = time.monotonic()
-            self.adapter.encode(original, encoded)
+            encode_source, silence_receipt = original, None
+            if self.silence:
+                def reserve_pcm(amount):
+                    nonlocal budget
+                    if not self._reserve(amount):
+                        return False
+                    budget += amount
+                    return True
+                encode_source, silence_receipt = self.silence.prepare(original, work, self._stop, reserve_pcm)
+            if self._stop.is_set():
+                raise RuntimeError('delivery-cancelled')
+            self.adapter.encode(encode_source, encoded)
+            if self._stop.is_set():
+                raise RuntimeError('delivery-cancelled')
+            if self.silence:
+                self.silence.metadata(original, encoded, work, self._stop)
             cover = artwork.apply(original, encoded, candidate, self.adapter, work)
             timings['encode'] = time.monotonic() - t
             t = time.monotonic()
-            valid, _ = audio.verify_audio_output(encoded, source=original)
+            if self.silence:
+                valid = self.silence.validate(encoded, silence_receipt, self._stop)
+            else:
+                valid, _ = audio.verify_audio_output(encoded, source=original)
             if not valid:
                 raise RuntimeError('output-validation-failed')
             timings['validate'] = time.monotonic() - t
+            if self._stop.is_set():
+                raise RuntimeError('delivery-cancelled')
             final_hash = self.sha256(encoded)
             final = folder / (stem + '.m4a')
             if final.exists() and self.sha256(final) != final_hash:
@@ -246,6 +270,10 @@ class Pipeline:
                       'provider_identity_verified': True, 'validation_version': 2,
                       'artwork': cover,
                       'timings': timings, 'duration_seconds': duration}
+            if silence_receipt is not None:
+                record['silence_identity'] = self.silence.identity
+                record['silence'] = silence_receipt
+                record['duration_seconds'] = silence_receipt['output_frames']/silence_receipt['sample_rate']
             if shared_with:
                 record['shared_source_identities'] = sorted(shared_with)
             self.write(record)

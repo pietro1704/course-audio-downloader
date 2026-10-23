@@ -109,7 +109,7 @@ class Delivery(FilePublisher):
 
     def __init__(self, root, destination, cloud, adapter=None, reserve_bytes=4 * 1024**3,
                  upload_timeout=900, poll_seconds=3, event=None, concurrency=1,
-                 max_concurrency=None,worker_limit=None,admission_poll_seconds=15):
+                 max_concurrency=None,worker_limit=None,admission_poll_seconds=15, silence=None):
         self.root = Path(root).resolve()
         self.destination = Path(destination).resolve()
         if self.destination == self.root or self.destination.is_relative_to(self.root):
@@ -134,7 +134,7 @@ class Delivery(FilePublisher):
         self.event_callback = event or (lambda stage, **fields: None)
         self.adapter = ObservedAdapter(adapter or SafariAdapter(), self.event)
         self.pipeline = Pipeline(self.root, self.adapter, concurrency=concurrency,
-                                 reserve_bytes=reserve_bytes, task_budget_bytes=512 * 1024**2)
+                                 reserve_bytes=reserve_bytes, task_budget_bytes=512 * 1024**2, silence=silence)
         self.reserve_bytes = reserve_bytes
         self.legacy = {}
         legacy_path = self.root / 'worker-manifest.jsonl'
@@ -168,6 +168,9 @@ class Delivery(FilePublisher):
 
     def check_receipt(self, receipt, lesson, target):
         folder, final = self.paths(lesson)
+        expected = self.pipeline.silence.identity if self.pipeline.silence else None
+        if receipt.get('state') not in {'complete', 'uploaded'} and receipt.get('silence_identity') != expected:
+            raise RuntimeError('silence-profile-mismatch')
         original = Path(receipt['original'])
         if (receipt.get('schema') != 1 or receipt.get('params') != PRESET
                 or receipt.get('source_identity') != Pipeline.identity(lesson['url'])
@@ -188,6 +191,8 @@ class Delivery(FilePublisher):
             if Path(record['final']).resolve() != final.resolve():
                 raise RuntimeError('delivery-identity-mismatch')
         elif final.exists():
+            if self.pipeline.silence or (record and record.get('silence_identity')):
+                raise RuntimeError('silence-profile-mismatch')
             self.event('validate-existing')
             old = self.legacy.get(ident, {})
             original = Path(old.get('original', folder / 'missing'))
@@ -235,6 +240,9 @@ class Delivery(FilePublisher):
                    **{key: record[key] for key in ('original', 'final', 'source_hash', 'final_hash')},
                    'size': final.stat().st_size, 'pipeline_timings': record.get('timings', {})}
         receipt['audio_seconds'] = record.get('duration_seconds')
+        if record.get('silence'):
+            receipt['silence'] = record['silence']
+            receipt['silence_identity'] = record['silence_identity']
         if record.get('artwork'):
             receipt['artwork'] = dict(record['artwork'])
         self.check_receipt(receipt, lesson, target)
@@ -482,7 +490,7 @@ class Delivery(FilePublisher):
                     candidates = self.pipeline.rank(self.adapter.resolve(lesson))
                 candidate = candidates[0] if candidates else None
             cover = artwork.apply(source, staged, candidate, self.adapter, folder)
-            if not audio.verify_audio_output(staged, source=source)[0]:
+            if not audio.verify_audio_output(staged, source=final if receipt.get('silence') else source)[0]:
                 raise RuntimeError('existing-final-validation-failed')
             update = dict(previous_hash=receipt['final_hash'], final_hash=Pipeline.sha256(staged),
                           size=staged.stat().st_size, staged=str(staged), artwork=cover)

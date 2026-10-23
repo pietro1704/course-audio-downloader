@@ -5,6 +5,7 @@ description = "Personal authenticated course audio downloader"
 requires-python = ">=3.11"
 dependencies = []
 [project.optional-dependencies]
+silence = ["numpy>=2,<3", "onnxruntime==1.23.2", "webrtcvad-wheels==2.0.14.post1"]
 extractor = ["yt-dlp>=2026.8.19"]
 
 [project.scripts]
@@ -20,3 +21,8 @@ py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["protected_pauses"]
+[tool.setuptools.package-data]
+protected_pauses = ["assets/*"]

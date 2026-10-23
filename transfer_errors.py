@@ -12,7 +12,7 @@ catalogue-media-identity-mismatch catalogue-profile-origin-mismatch cleanup-hash
 cloud-copy-hash-mismatch cloud-destination-conflict cloud-document-hash-mismatch
 cloud-exclusive-promotion-failed cloud-final-hash-mismatch cloud-receipt-metadata-mismatch
 cloud-size-mismatch delivery-cancelled delivery-identity-mismatch disk-full disk-reserve
-document-cancelled document-cleanup-hash-mismatch document-delivery-incomplete
+document-cancelled document-cleanup-hash-mismatch document-delivery-incomplete document-http-error
 document-inventory-timeout document-is-media document-login-or-html-response
 document-page-identity-timeout document-receipt-identity-mismatch document-size-budget-exceeded
 document-size-mismatch document-source-hash-mismatch documents-require-explicit-browser-target
@@ -35,7 +35,9 @@ local-final-hash-mismatch login-required media-download-failed missing-catalogue
 missing-document-download-url missing-document-filename missing-document-identity
 missing-media-assets missing-next-data missing-player-hls missing-player-vod-audio
 missing-prepared-document missing-profile-origin missing-variants no-audio-candidate
-output-validation-failed overlapping-working-and-cloud-roots oversized-manifest
+silence-profile-mismatch silence-dependency-missing silence-model-hash-mismatch
+silence-inference-failed silence-codec-failed silence-invalid-pcm silence-pcm-budget-exceeded
+silence-processing-timeout output-validation-failed overlapping-working-and-cloud-roots oversized-manifest
 player-audio-download-failed player-download-timeout player-fetch-failed player-identity-mismatch
 player-remux-failed player-response-too-large player-segment-fetch-failed player-segment-size-budget
 player-segment-timeout player-source-duration-mismatch protected-media-not-supported
@@ -44,7 +46,7 @@ timeout-expired unbounded-or-invalid-hls-duration unconfirmed-cloud-document
 unexpected-complete-document-source unexpected-media-content-type unresolved-external-media
 unsafe-document-path unsafe-player-media-url unsupported-lesson unsupported-media-host
 unsupported-provider untracked-local-document untrusted-existing-final
-""".split())
+""".split()) | frozenset(f'document-http-{code}' for code in range(400, 600))
 
 
 def failure_reason(error):

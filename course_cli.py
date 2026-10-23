@@ -90,6 +90,8 @@ def main(argv=None):
     p.add_argument('--destination',required=True);p.add_argument('--icloud-python',required=True)
     p.add_argument('--concurrency',type=int,default=2,choices=range(1,9))
     p.add_argument('--encoder',choices=['aac','aac_at'],default='aac_at')
+    p.add_argument('--protected-pauses',action='store_true',
+                   help='Compact new lessons using protected-v1 (install the silence extra)')
     p.add_argument('--limit',type=int);p.add_argument('--start',type=int,default=0)
     p.add_argument('--min-free-gib',type=float,default=4)
     p.add_argument('--upload-timeout',type=float,default=900,
@@ -101,7 +103,13 @@ def main(argv=None):
     p.add_argument('--refresh-completed-artwork',action='store_true',
                    help='Explicitly retry missing covers on completed native uploads before delivery')
     args=p.parse_args(argv)
-    if args.documents_only and args.reconcile_original_artwork:p.error('incompatible delivery modes')
+    if (args.documents_only and args.reconcile_original_artwork) or (args.protected_pauses and
+            (args.documents_only or args.reconcile_original_artwork or args.refresh_completed_artwork)):
+        p.error('incompatible delivery modes')
+    silence = None
+    if args.protected_pauses:
+        from protected_pauses import Compactor
+        silence = Compactor()
     if (args.start<0 or (args.limit is not None and args.limit<1) or args.min_free_gib<4
             or args.probe<0 or not math.isfinite(args.upload_timeout)
             or not 1<=args.upload_timeout<=21600):
@@ -120,6 +128,14 @@ def main(argv=None):
             print(json.dumps(dict(schema='course-documents-dry-run/v1',ok=True,total=len(lessons),
                 probed=min(args.probe,len(lessons)),lessons=document_rows),ensure_ascii=False));return 0
         rows=preflight(lessons,profile,root,destination,cloud)
+        journal_path=root/'Documentacao/delivery-journal.json'
+        journal=json.loads(journal_path.read_text()) if journal_path.exists() else {}
+        selected = {r['source_identity'] for r in rows}
+        for receipt in journal.values():
+            if (receipt.get('source_identity') in selected
+                    and receipt.get('state') not in {'complete','uploaded'}
+                    and receipt.get('silence_identity') != (silence.identity if silence else None)):
+                raise ValueError('silence-profile-mismatch')
         pending=[lesson for lesson,row in zip(lessons,rows) if row['state']!='complete']
         adapter=build_adapter(profile,args.encoder) if args.probe else None
         for lesson in pending[:args.probe]:
@@ -128,6 +144,7 @@ def main(argv=None):
                     complete=sum(x['state']=='complete' for x in rows),uploaded=sum(x['state']=='uploaded' for x in rows),prepared=sum(x['state']=='prepared' for x in rows),
                     pending=sum(x['state']=='pending' for x in rows),probed=min(args.probe,len(pending)),
                     concurrency=args.concurrency,lessons=rows)
+        if silence:report['silence_identity']=silence.identity
         report['document_lessons']=document_rows
         print(json.dumps(report,ensure_ascii=False));return 0
     requested_concurrency=args.concurrency
@@ -154,7 +171,7 @@ def main(argv=None):
                           reserve_bytes=int(args.min_free_gib*1024**3),concurrency=args.concurrency,
                           max_concurrency=requested_concurrency,
                           worker_limit=lambda:admitted_workers(root,requested_concurrency,int(args.min_free_gib*1024**3)),
-                          upload_timeout=args.upload_timeout,event=progress.event)
+                          upload_timeout=args.upload_timeout,event=progress.event,silence=silence)
         progress.current['delivered']=delivery.completed_count()
         work=[(lesson,destination/relative_audio_path(lesson)) for lesson in lessons]
         stopped=threading.Event()

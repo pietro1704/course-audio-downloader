@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - name: Native Foundation boundary and bounded operations
-        run: uv run --python 3.11 --with pyobjc-framework-Cocoa python -m unittest -v test_icloud_bridge test_native_cloud test_bounded_actions test_browser_activation
+        run: uv run --python 3.11 --with pyobjc-framework-Cocoa python -m unittest -v test_icloud_bridge test_native_cloud test_bounded_actions test_browser_activation test_document_failures
   test:
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +23,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
       - name: Sync
-        run: uv sync
+        run: uv sync --extra silence
       - uses: actions/setup-node@v4
         with:
           node-version: 22
