@@ -86,8 +86,10 @@ class EmbeddedAdapter(SafariAdapter):
                 if not urls:raise RuntimeError('missing-media-assets')
                 media=urls[0]
                 if self.profile.get('prefer_audio_rendition') is True:
-                    from media_transport import get_text,select_rendition
-                    media=select_rendition(media,get_text(media,src),audio_only=True) or media
+                    from media_transport import get_text,select_rendition,shared_muxed_audio
+                    playlist=get_text(media,src)
+                    media=(select_rendition(media,playlist,audio_only=True)
+                           or shared_muxed_audio(media,playlist) or media)
                 candidate=Candidate(media,'hls-audio',referer=src,thumbnail_url=media_thumbnail(payload,self.profile));self._meta[candidate.url]={'referer':src};self._last_media=(wanted,urlsplit(src).path)
                 frame=urlsplit(src)
                 origin=frame.scheme+'://'+(frame.hostname or '')

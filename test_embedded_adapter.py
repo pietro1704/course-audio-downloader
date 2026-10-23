@@ -124,6 +124,21 @@ class EmbeddedTests(unittest.TestCase):
         with patch('media_transport.get_text',side_effect=AssertionError('opt-in required')):
             self.resolve_with_artwork(None)
 
+    def test_shared_muxed_rendition_avoids_extra_video_and_preserves_artwork_context(self):
+        master='''#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="common",NAME="Audio",DEFAULT=YES
+#EXT-X-STREAM-INF:BANDWIDTH=900000,CODECS="mp4a.40.2,avc1.640029",AUDIO="common"
+high.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=180000,CODECS="mp4a.40.2,avc1.640029",AUDIO="common"
+low.m3u8
+'''
+        with patch('media_transport.get_text',return_value=master) as fetch:
+            candidate=self.resolve_with_artwork('https://cdn.test/cover.jpg',profile_overrides={'prefer_audio_rendition':True})
+        self.assertEqual(candidate.url,'https://cdn.test/low.m3u8')
+        self.assertEqual(candidate.thumbnail_url,'https://cdn.test/cover.jpg')
+        self.assertEqual(candidate.referer,'https://embed.example.test/embed/clip')
+        fetch.assert_called_once()
+
     def test_audio_rendition_invalid_manifest_and_cancellation_are_not_suppressed(self):
         for manifest,error in [('not a playlist',RuntimeError),('#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,DEFAULT=YES,URI="http://cdn.test/unsafe.m3u8"',RuntimeError),(None,KeyboardInterrupt)]:
             with self.subTest(manifest=manifest),patch('media_transport.get_text',return_value=manifest,side_effect=KeyboardInterrupt() if manifest is None else None):
