@@ -9,6 +9,34 @@ from embedded_adapter import parse_next_data, media_urls, load_lessons, Candidat
 from test_profiles import ProfiledEmbeddedAdapter as EmbeddedAdapter
 
 class EmbeddedTests(unittest.TestCase):
+    def resolve_alias_page(self,aliases=None,actual_id='ClipAbC'):
+        from embedded_adapter import EmbeddedAdapter as Adapter
+        profile={'mode':'embedded-json','origin':'https://portal.example.test',
+                 'player':{'host_pattern':r'embed\.example\.test'}}
+        if aliases is not None:profile['url_path_prefix_aliases']=aliases
+        adapter=Adapter(profile=profile,timeout=.1)
+        lesson={'url':'https://portal.example.test/en-GB/content/ClipAbC','title':'Lesson'}
+        page={'url':'https://portal.example.test/en-gb/content/'+actual_id,'title':'Lesson',
+              'auth':True,'ready':'complete','canonical':'',
+              'active':[{'path':'/en-gb/content/'+actual_id,'title':'Lesson'}],
+              'iframes':['https://embed.example.test/embed/clip']}
+        payload={'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn.test/audio.m3u8'}]}}}}
+        with patch.object(adapter,'_eval_embedded',return_value=page),\
+             patch.object(adapter,'_iframe_html',return_value='<script id="__NEXT_DATA__">'+json.dumps(payload)+'</script>'),\
+             patch('embedded_adapter.time.monotonic',side_effect=itertools.count(0,.01)),\
+             patch('embedded_adapter.time.sleep'):
+            return adapter.resolve(lesson)
+
+    def test_embedded_resolver_honors_declared_route_alias_for_page_and_active_item(self):
+        result=self.resolve_alias_page({'/en-GB/':'/en-gb/'})
+        self.assertEqual(result[0].url,'https://cdn.test/audio.m3u8')
+
+    def test_embedded_route_alias_keeps_default_strict_and_lesson_id_case_sensitive(self):
+        with self.assertRaisesRegex(RuntimeError,'embedded-lesson-identity-timeout'):
+            self.resolve_alias_page()
+        with self.assertRaisesRegex(RuntimeError,'embedded-lesson-identity-timeout'):
+            self.resolve_alias_page({'/en-GB/':'/en-gb/'},actual_id='clipabc')
+
     def test_parse(self):
         data={'props':{'pageProps':{'applicationData':{'mediaAssets':[{'url':'https://cdn/x.m3u8'}]}}}}
         self.assertEqual(media_urls(parse_next_data('<script id="__NEXT_DATA__">'+json.dumps(data)+'</script>')),['https://cdn/x.m3u8'])

@@ -22,7 +22,8 @@ Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedd
 If a provider publishes equivalent route prefixes, a profile may declare
 `"url_path_prefix_aliases": {"/en-GB/": "/en-gb/"}`. Browser audio resolution and
 document discovery normalize only these explicit prefixes when comparing the
-current, requested and canonical page URLs. Origins and the rest of each path,
+current, requested and canonical page URLs. Embedded JSON resolution applies
+the same aliases to the current page and active lesson path. Origins and the rest of each path,
 including case-sensitive lesson IDs, must still match. Default comparisons stay
 strict. Catalogue URLs, persisted identities and raw document page guards stay
 unchanged; this option does not rewrite stored receipts or bypass page checks.
