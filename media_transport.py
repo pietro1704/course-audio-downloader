@@ -11,10 +11,10 @@ class Player(HTMLParser):
     def handle_starttag(self,tag,attrs):
         if tag==self.element: self.players.append(dict(attrs))
 
-def get_text(url, referer):
+def get_text(url, referer, urlopen=None):
     request=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':referer})
     try:
-        with urllib.request.urlopen(request,timeout=60) as response:
+        with (urlopen or urllib.request.urlopen)(request,timeout=60) as response:
             raw=response.read(8*1024**2+1)
             if len(raw)>8*1024**2: raise RuntimeError('player-response-too-large')
             return raw.decode('utf-8')
@@ -134,13 +134,13 @@ def plain_segments(url,text):
     if not segments or len(segments)!=len(durations): raise RuntimeError('invalid-player-segment-list')
     return segments,sum(durations)
 
-def read_fragment(url,referer):
+def read_fragment(url,referer,urlopen=None):
     # Four in-flight fragments, each capped at 16 MiB; no movie spool on disk.
     import time
     for attempt in range(3):
         try:
             request=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':referer})
-            with urllib.request.urlopen(request,timeout=30) as response:
+            with (urlopen or urllib.request.urlopen)(request,timeout=30) as response:
                 if response.headers.get_content_type() in {'text/html','application/json'}:
                     raise RuntimeError('invalid-player-segment-content')
                 length=int(response.headers.get('Content-Length') or 0)
@@ -159,11 +159,11 @@ def read_fragment(url,referer):
             if isinstance(error,HTTPError): error.close()
             if attempt==2: raise RuntimeError('player-segment-fetch-failed') from None
 
-def copy_hls_audio(candidate,destination,max_bytes,referer):
+def copy_hls_audio(candidate,destination,max_bytes,referer,urlopen=None):
     import subprocess,time
     from concurrent.futures import ThreadPoolExecutor
     import course_audio_bot as audio
-    parsed=plain_segments(candidate.url,get_text(candidate.url,referer))
+    parsed=plain_segments(candidate.url,get_text(candidate.url,referer,urlopen=urlopen) if urlopen else get_text(candidate.url,referer))
     if parsed is None:
         from embedded_adapter import EmbeddedAdapter
         adapter=EmbeddedAdapter(max_source_bytes=max_bytes)
@@ -179,7 +179,7 @@ def copy_hls_audio(candidate,destination,max_bytes,referer):
             for i in range(0,len(segments),4):
                 if time.monotonic()-start>7200: raise RuntimeError('player-download-timeout')
                 # Batch submission prevents eager whole-movie buffering by executor.map.
-                futures=[pool.submit(read_fragment,url,referer) for url in segments[i:i+4]]
+                futures=[pool.submit(read_fragment,url,referer,urlopen) if urlopen else pool.submit(read_fragment,url,referer) for url in segments[i:i+4]]
                 for future in futures: process.stdin.write(future.result())
         process.stdin.close()
         if process.wait(timeout=120): raise RuntimeError('player-remux-failed')

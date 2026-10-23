@@ -5,11 +5,18 @@ import re
 import time
 import unicodedata
 from urllib.parse import urlsplit
-from provider_profiles import profile_for
 from course_catalog import path_parts
 from documents import document_resource,validate_document_paths
 from pipeline import Pipeline
 from local_paths import component
+
+
+def automatic_profile(url):
+    value=urlsplit(url)
+    if value.scheme!='https' or value.username or value.password or not value.hostname:
+        raise ValueError('invalid-course-url')
+    return dict(origin=value.scheme+'://'+value.netloc,mode='automatic',generic=True,
+                lesson_path_pattern=r'/.*',course=dict(entry_path_pattern=r'/.*',automatic=True))
 
 
 def parse_course(page,profile):
@@ -64,7 +71,7 @@ def collect_attachments(course,browser):
 
 
 def discover(url,*,profile=None,browser=None,timeout=30):
-    profile=dict(profile or profile_for(url))
+    profile=dict(profile or automatic_profile(url))
     parsed=urlsplit(url)
     if (parsed.scheme+'://'+parsed.netloc!=profile['origin'].rstrip('/') or parsed.username or parsed.password
             or not re.fullmatch(profile['course']['entry_path_pattern'],parsed.path)):
@@ -101,6 +108,9 @@ lessons:[...document.querySelectorAll(p.links_selector)].filter(a=>!p.generic||(
 return {url:a.href,title:text(p.lesson_title_selector?a.querySelector(p.lesson_title_selector):a),
 duration:(p.duration_selector?a.querySelector(p.duration_selector)?.textContent?.trim():'')||'',
 module:group&&p.module_title_selector?ownText(group.querySelector(p.module_title_selector)):''}})});})()'''.replace('SETTINGS',settings)
+    if profile['course'].get('automatic'):
+        from automatic_site import CURRICULUM_SCRIPT
+        script=CURRICULUM_SCRIPT
     deadline=time.monotonic()+timeout;previous=None;stable=0;wrong_page=False
     while time.monotonic()<deadline:
         page=browser._script(script)

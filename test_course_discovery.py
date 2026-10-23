@@ -2,7 +2,7 @@ import copy
 import unittest
 from unittest.mock import patch
 from course_discovery import discover,parse_course,collect_attachments
-from provider_profiles import profile_for
+from course_discovery import automatic_profile
 
 PROFILE={'origin':'https://school.example.test','lesson_path_pattern':r'/lesson/\d+',
  'course':{'entry_path_pattern':r'/course/\d+','title_selector':'h1','links_selector':'a.lesson',
@@ -61,12 +61,11 @@ class DiscoveryTests(unittest.TestCase):
   class Browser:
    def inventory(self,lesson):raise RuntimeError('login-required')
   with self.assertRaisesRegex(RuntimeError,'login-required'):collect_attachments(parse_course(PAGE,PROFILE),Browser())
- def test_provider_detection_uses_bundled_contract_without_browser_credentials(self):
-  self.assertEqual(profile_for('https://padrepauloricardo.org/cursos/example')['mode'],'direct')
-  self.assertTrue(profile_for('https://other.example/course')['generic'])
-  self.assertEqual(profile_for('https://sala.institutoborborema.com/area/conteudo/aula/123')['mode'],'embedded-json')
-  for url in ['http://padrepauloricardo.org/cursos/example','https://user:secret@padrepauloricardo.org/cursos/example']:
-   with self.subTest(url=url),self.assertRaises(ValueError):profile_for(url)
+ def test_automatic_profile_uses_the_input_origin_without_public_site_contracts(self):
+  self.assertEqual(automatic_profile('https://school.example.test/course/intro')['origin'],'https://school.example.test')
+  self.assertEqual(automatic_profile('https://another.example/course')['mode'],'automatic')
+  for url in ['http://school.example.test/course','https://user:secret@school.example.test/course']:
+   with self.subTest(url=url),self.assertRaises(ValueError):automatic_profile(url)
  def test_discovery_uses_exact_page_and_stable_metadata(self):
   class Browser:
    def inventory(self,lesson):return []

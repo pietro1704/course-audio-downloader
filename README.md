@@ -1,15 +1,15 @@
 # Course audio downloader
 
-Personal downloader for courses you can access in an authenticated browser. The URL workflow uses bundled declarative provider contracts; advanced delivery also accepts private site profiles.
+Personal downloader for courses you can access in an authenticated browser. The URL workflow discovers the curriculum from the authenticated page; advanced delivery also accepts private site profiles.
 
 The URL CLI and local website target Windows, Linux and macOS. They require Python 3.11+, ffmpeg/ffprobe and the managed Chromium renderer. Private cookies are read from the browser where you are signed in. Native iCloud delivery remains specific to macOS with PyObjC Foundation.
 
 Install with `uv sync --python 3.12` and `uv run playwright install chromium`, then pass only the course URL:
 
 ```sh
-uv run course-deliver https://padrepauloricardo.org/cursos/COURSE
+uv run course-deliver https://courses.example.test/course/intro
 # Preserve original pauses instead:
-uv run course-deliver --no-silence-removal https://padrepauloricardo.org/cursos/COURSE
+uv run course-deliver --no-silence-removal https://courses.example.test/course/intro
 # Open the local website using the same Python engine:
 uv run course-site
 ```
@@ -24,14 +24,14 @@ the source browser; cookies cannot bypass subscription or DRM requirements.
 The internal renderer runs on its own thread so the CLI and website share the
 same discovery, download and processing behavior.
 
-PPR and Instituto Borborema have bundled declarative discovery contracts. A
-fallback recognizes common lesson links and module containers on other sites;
-site-specific navigation or private APIs may still need an additional contract.
-Cookies provide authentication, not a universal curriculum schema. A lesson URL
-with a visible curriculum is accepted, including Borborema's lesson pages.
-For larger courses the full index is returned immediately; attachments on the
-entry lesson are listed, and the remaining lesson inventories are checked during
-download. They are never represented as confirmed empty inventories.
+Curriculum discovery uses lesson links, repeated module containers, headings and
+page metadata rather than public course catalogs or provider-specific profiles.
+A lesson URL with a visible curriculum is accepted. Different navigation or
+private APIs can still require improvements to the generic discovery logic;
+cookies provide authentication rather than a universal curriculum schema.
+For larger courses the index is returned first; attachments on the entry lesson
+are listed, and remaining lesson inventories are checked during download. They
+are never represented as confirmed empty inventories.
 
 `course-deliver --inspect URL` discovers metadata without downloading media or
 attachments. The website opens its session automatically at

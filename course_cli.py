@@ -22,6 +22,9 @@ from transfer_errors import failure_reason
 
 
 def build_adapter(profile,encoder='aac_at'):
+    if profile['mode']=='automatic':
+        from automatic_site import AutomaticAdapter
+        return AutomaticAdapter(profile,encoder=encoder)
     cls={'direct':SafariAdapter,'embedded-json':EmbeddedAdapter,'template-hls':TemplateAdapter,'extractor':ExtractorAdapter}[profile['mode']]
     if '_browser_runtime' in profile:
         from authenticated_browser import cookie_adapter

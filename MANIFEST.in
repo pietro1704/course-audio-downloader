@@ -3,6 +3,5 @@ include test_*.py pipeline_test.py
 recursive-include docs *.md
 recursive-include protected_pauses/assets *
 include tests/fixtures/public-speech.wav tests/fixtures/README.md
-recursive-include provider_profiles *.json
 recursive-include local_portal/assets *
 include tests/local_portal_ui.cjs

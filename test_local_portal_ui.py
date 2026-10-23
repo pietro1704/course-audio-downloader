@@ -17,6 +17,7 @@ class BrowserPortalUITests(unittest.TestCase):
     def exercise(self,engine):
         import tempfile
         import threading
+        import shutil
         from playwright.sync_api import sync_playwright
         from local_portal import Portal,Server
         from pipeline import Pipeline
@@ -28,11 +29,13 @@ class BrowserPortalUITests(unittest.TestCase):
                 self.root=Path(root);self.root.mkdir(parents=True);self.docs=self.root/'docs';self.docs.mkdir()
                 self.publish=on_artifact;self.remove=protected_pauses
             def run(self,selected):
-                path=self.root/'first.m4a';path.write_bytes(b'verified audio fixture')
+                path=self.root/'first.m4a';shutil.copyfile(audio_source,path)
                 record=dict(final=str(path),final_hash=Pipeline.sha256(path),source_identity='one')
                 self.publish(record,'audio');entered.set();released.wait(10);return [record]
             def cancel(self):released.set()
         with tempfile.TemporaryDirectory() as root:
+            audio_source=Path(root)/'synthetic.m4a'
+            subprocess.run(['ffmpeg','-v','error','-nostdin','-f','lavfi','-i','anullsrc=r=44100:cl=mono','-t','1','-c:a','aac',str(audio_source)],check=True,capture_output=True)
             portal=Portal(root,discovery=lambda url:(course,{}),factory=Engine);server=Server(0,portal)
             thread=threading.Thread(target=server.serve_forever);thread.start()
             try:
@@ -47,6 +50,15 @@ class BrowserPortalUITests(unittest.TestCase):
                         self.assertTrue(page.locator('#silence-removal').is_checked())
                         page.locator('#download-course').click();self.assertTrue(entered.wait(5))
                         page.locator('audio').wait_for(state='visible')
+                        page.locator('audio').evaluate("audio=>{audio.preload='auto';audio.load()}")
+                        page.locator('audio').evaluate('''audio=>new Promise((resolve,reject)=>{
+                            const timer=setTimeout(()=>reject(Error('audio-timeout')),8000);
+                            const ready=()=>{clearTimeout(timer);resolve(true)};
+                            const failed=()=>{clearTimeout(timer);reject(Error('audio-decode-failed'))};
+                            if(audio.error)failed();else if(audio.readyState>=3)ready();
+                            else{audio.addEventListener('canplay',ready,{once:true});audio.addEventListener('error',failed,{once:true});}
+                        })''')
+                        self.assertGreater(page.locator('audio').evaluate('audio=>audio.duration'),.9)
                         self.assertFalse(portal.state()['job']['ready']);self.assertTrue(portal.engine.remove)
                         self.assertTrue(page.locator('#archive').is_hidden())
                         result=page.evaluate("""async()=>{const r=await fetch(document.querySelector('audio').src,{headers:{Range:'bytes=0-7'}});return {status:r.status,bytes:(await r.arrayBuffer()).byteLength}}""")

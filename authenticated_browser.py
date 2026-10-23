@@ -167,6 +167,9 @@ class CookieAdapterMixin:
 
 
 def browser_documents(profile):
+    if profile.get('mode')=='automatic':
+        from automatic_site import AutomaticDocuments
+        return AutomaticDocuments(profile)
     from document_browser import DocumentBrowser
     class Documents(CookieAdapterMixin,DocumentBrowser):pass
     return Documents(profile=profile)

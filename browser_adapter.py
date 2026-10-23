@@ -173,8 +173,11 @@ end tell'''
     def download(self, candidate, destination):
         if candidate.kind == 'hls-audio':
             from media_transport import copy_hls_audio
-            return copy_hls_audio(candidate,destination,self.max_source_bytes,self._hls_meta.get(candidate.url, candidate.referer or ""))
-        req = urllib.request.Request(candidate.url, headers={'User-Agent': 'Mozilla/5.0'})
+            options={'urlopen':self.urlopen} if hasattr(self,'urlopen') else {}
+            return copy_hls_audio(candidate,destination,self.max_source_bytes,self._hls_meta.get(candidate.url, candidate.referer or ""),**options)
+        headers={'User-Agent':'Mozilla/5.0'}
+        if candidate.referer:headers['Referer']=candidate.referer
+        req = urllib.request.Request(candidate.url, headers=headers)
         try:
             with getattr(self,'urlopen',urllib.request.urlopen)(req, timeout=90) as response, destination.open('wb') as output:
                 if response.headers.get_content_type() in {'text/html', 'application/json'}:

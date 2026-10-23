@@ -25,16 +25,15 @@ course-supervise-jobs = "job_supervisor:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "transfer_errors", "file_delivery", "documents", "document_browser", "bounded_actions", "course_discovery", "local_course", "authenticated_browser", "portable_lock", "local_paths"]
+py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "transfer_errors", "file_delivery", "documents", "document_browser", "bounded_actions", "course_discovery", "local_course", "authenticated_browser", "portable_lock", "local_paths", "automatic_site"]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["protected_pauses", "provider_profiles", "local_portal"]
+include = ["protected_pauses", "local_portal"]
 [tool.setuptools.package-data]
 protected_pauses = ["assets/*"]
 
-provider_profiles = ["*.json"]
 local_portal = ["assets/*"]
