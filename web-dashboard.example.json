@@ -1,0 +1,14 @@
+{
+  "schema": "course-web/v1",
+  "jobs": [
+    {
+      "id": "example-course",
+      "label": "Meu curso",
+      "catalog": "/path/to/course-catalog.json",
+      "profile": "/path/to/site-profile.json",
+      "root": "/path/to/local/work",
+      "destination": "/path/to/iCloud/Courses",
+      "icloud_python": "/path/to/foundation/python"
+    }
+  ]
+}

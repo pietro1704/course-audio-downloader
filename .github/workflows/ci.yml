@@ -29,6 +29,13 @@ jobs:
           node-version: 22
       - name: Tests
         run: uv run python -m unittest -v
+      - name: Web interface contracts
+        run: node --test web/model.test.mjs
+      - name: Browser interface regression
+        run: |
+          npm ci --prefix web --ignore-scripts
+          web/node_modules/.bin/playwright install --with-deps chromium
+          COURSE_WEB_PYTHON="$PWD/.venv/bin/python" npm --prefix web run test:browser
       - name: Repository hygiene check
         run: |
           git ls-files

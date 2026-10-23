@@ -195,3 +195,69 @@ No completed library is automatically reprocessed. The distributed model is
 pinned to Silero revision `bfdc0193023f121ea5b3cc7b176dbed570a68a59`, SHA256
 `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
 Silero and WebRTC notices ship in `protected_pauses/assets/`.
+
+### Website UI, local CLI execution
+
+The Cloudflare Pages UI controls `course-deliver` through the loopback-only
+`course-web` adapter. Open it on the same Mac that runs the CLI. Safari,
+FFmpeg, iCloud, conversion, verification, resume and cleanup all stay in the
+existing CLI. The website stores no course files, credentials or delivery state.
+
+1. Copy `web-dashboard.example.json` to a private location outside this repository.
+   Register each course with an ID, display name, existing catalogue/site profile,
+   working root, iCloud destination and Foundation-enabled Python interpreter.
+   Paths are absolute. Profiles remain trusted local code; the website cannot
+   register files or submit shell commands.
+2. Install the optional runtimes you need, for example
+   `uv sync --python 3.12 --extra silence --extra extractor`.
+3. Start the local adapter (replace the origin with the actual Pages URL):
+
+   ```sh
+   uv run course-web --config /private/path/dashboard.json \
+     --origin https://course-audio-downloader-web.pages.dev
+   ```
+
+4. Open the private pairing link printed by the terminal on that Mac. Allow
+   local-network access if your browser requests it. Keep the terminal running.
+   Closing it requests graceful CLI cancellation and waits for active work.
+   Disconnecting/reloading the website alone leaves the CLI running.
+
+The website offers read-only preflight, audio/document delivery, document-only
+backfill, artwork recovery/refresh, protected pauses and existing CLI limits.
+Operations start only from an explicit button action. Registered catalogue and
+profile hashes are checked before launch; restart the adapter after editing
+those inputs. A single owned CLI runs at a time. Duplicate request IDs retain their result for the current bridge’s last 128
+requests and its last persisted run across restarts; stale cancellation IDs are rejected, and only the owned child can be
+cancelled. The inherited worker lease prevents a bridge restart from launching
+over its still-running child. A detached child is shown without a cancellation
+button; unknown completion is never presented as success. CLI locks and receipt
+checks remain authoritative.
+
+The adapter binds only `127.0.0.1`, checks exact Host/Origin and uses an ephemeral
+bearer pairing key. Keys travel in the URL fragment (removed immediately) and
+local Authorization headers, never cookies, query parameters or browser storage.
+Cloudflare receives static assets only. Do not expose the local adapter through
+an unauthenticated tunnel. Browser mixed-content/local-network policies vary;
+this interface requires loopback access from the browser on the same Mac.
+
+Build and publish the static allowlist after checks pass:
+
+```sh
+python scripts/build_web.py
+web/node_modules/.bin/wrangler pages project create course-audio-downloader-web --production-branch production
+web/node_modules/.bin/wrangler pages deploy .web-dist --project-name course-audio-downloader-web --branch production
+```
+
+Create the Pages project only once. Wrangler uses your Cloudflare login outside
+the repo. `wrangler.toml` identifies the Pages project and public output directory;
+`.web-dist` contains only HTML, CSS, browser JS and response headers.
+
+Web checks: `node --test web/model.test.mjs`; install browser-test dependencies
+with `npm ci --prefix web --ignore-scripts`, then
+`web/node_modules/.bin/playwright install chromium` and
+`COURSE_WEB_PYTHON="$PWD/.venv/bin/python" npm --prefix web run test:browser`.
+The browser suite uses an isolated public catalogue, real CLI dry-run, and a
+controlled child process for progress/cancellation. It never accesses a real
+course or uploads files. Full Python tests include real HTTP, authentication,
+CORS, command rejection, input identity, CLI failures, duplicate requests and
+owned cancellation coverage.

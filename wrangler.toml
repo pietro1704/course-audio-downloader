@@ -1,0 +1,3 @@
+name = "course-audio-downloader-web"
+pages_build_output_dir = ".web-dist"
+compatibility_date = "2026-10-23"

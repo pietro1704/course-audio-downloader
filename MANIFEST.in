@@ -3,3 +3,6 @@ include test_*.py pipeline_test.py
 recursive-include docs *.md
 recursive-include protected_pauses/assets *
 include tests/fixtures/public-speech.wav tests/fixtures/README.md
+include web/*.html web/*.css web/*.js web/*.mjs web/package.json web/_headers
+include web/*.json web/playwright.config.mjs wrangler.toml web-dashboard.example.json
+include scripts/build_web.py scripts/web_browser_fixture.py

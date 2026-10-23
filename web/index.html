@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#183d3d"><meta name="referrer" content="no-referrer">
+  <title>Course Audio · Seus cursos, para ouvir</title>
+  <link rel="icon" href="data:,"><link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="Course Audio início"><span class="brand-icon">◖</span> course<span>audio</span></a>
+    <div class="section-label">BIBLIOTECA</div>
+    <div class="nav-active"><span>♫</span> Meus cursos <span class="nav-dot"></span></div>
+    <div class="sidebar-note"><span class="local-icon">↔</span><strong>Seu Mac faz o trabalho.</strong><p>O site acompanha o CLI. Seus arquivos e sua sessão dos cursos ficam no computador.</p></div>
+    <div class="sidebar-footer">Feito para aprender no seu ritmo.</div>
+  </aside>
+  <main>
+    <header><span class="eyebrow">SEU ESPAÇO DE APRENDIZADO</span><span id="connection-status" class="badge"><i></i> Mac desconectado</span></header>
+    <section class="intro"><div><h1>Seus cursos,<br><em>para ouvir.</em></h1><p>Prepare os áudios no Mac e leve o aprendizado com você.</p></div><div class="wave" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div></section>
+    <section id="pairing" class="card connect-card" aria-labelledby="pairing-title">
+      <div class="step-number">01</div><div class="connect-description"><h2 id="pairing-title">Conecte seu Mac</h2><p>Abra o link de conexão gerado pelo <code>course-web</code>. Ou informe abaixo a chave exibida no seu terminal.</p></div>
+      <form id="connect-form"><label for="token">Chave de conexão</label><div class="connect-inputs"><input id="token" type="password" autocomplete="off" spellcheck="false" required placeholder="Cole sua chave privada"><button class="primary" type="submit">Conectar <span>↗</span></button></div><details><summary>Porta local</summary><label for="port">Porta do course-web</label><input id="port" type="number" min="1024" max="65535" value="8765" required></details></form>
+    </section>
+    <div id="message" role="status" aria-live="polite" hidden></div>
+    <div class="workspace">
+      <section class="card course-card" aria-labelledby="course-title"><div class="card-heading"><span class="step-number">02</span><h2 id="course-title">Escolha o curso</h2></div><div id="courses" class="courses"><div class="empty"><span>⌁</span><h3>Uma biblioteca, no seu Mac.</h3><p>Conecte para ver os cursos cadastrados no CLI.</p></div></div></section>
+      <section class="card controls-card" aria-labelledby="action-title"><div class="card-heading"><span class="step-number">03</span><h2 id="action-title">Prepare sua entrega</h2></div>
+        <form id="run-form"><fieldset id="run-fields" disabled>
+          <label for="operation">O que você quer fazer?</label><select id="operation"><option value="check">Verificar sem baixar</option><option value="deliver">Baixar e entregar áudios + documentos</option><option value="documents">Entregar só documentos</option><option value="reconcile-artwork">Recuperar capas originais</option><option value="refresh-artwork">Atualizar capas faltantes</option></select>
+          <label class="toggle-row" for="protected"><span><strong>Encurtar pausas protegidas</strong><small>Preserva a velocidade e o tom da voz.</small></span><input id="protected" type="checkbox" role="switch"></label>
+          <div class="two-columns"><div><label for="concurrency">Aulas em paralelo</label><input id="concurrency" type="number" min="1" max="8" value="2" required></div><div><label for="limit">Quantidade de aulas</label><input id="limit" type="number" min="1" max="1000000" placeholder="Todas"></div></div>
+          <details class="advanced"><summary>Ajustes da entrega</summary><div class="two-columns"><div><label for="start">Iniciar no índice</label><input id="start" type="number" min="0" max="1000000" value="0" required></div><div><label for="encoder">Codificador</label><select id="encoder"><option value="aac_at">AAC do Mac</option><option value="aac">AAC portátil</option></select></div><div><label for="reserve">Reserva em disco (GiB)</label><input id="reserve" type="number" min="4" value="4" required></div><div><label for="timeout">Espera pelo iCloud (s)</label><input id="timeout" type="number" min="1" max="21600" value="900" required></div><div><label for="probe">Consultar aulas no Safari</label><input id="probe" type="number" min="0" max="32" value="0" required><small>Na verificação. Zero mantém o navegador intacto.</small></div></div></details>
+          <button id="start-button" class="primary full" type="submit">Verificar curso <span>↗</span></button><p class="action-note" id="action-note">Confere o catálogo e os recibos sem baixar ou alterar arquivos.</p>
+        </fieldset></form>
+      </section>
+    </div>
+    <section class="card progress-card" aria-labelledby="progress-title"><div class="progress-header"><div><span class="eyebrow">ACOMPANHAMENTO</span><h2 id="progress-title">Tudo pronto para começar.</h2></div><button id="cancel-button" class="secondary" type="button" hidden>Cancelar com segurança</button></div><p id="progress-detail">O andamento real do CLI aparece aqui quando você iniciar uma operação.</p><progress id="progress" max="1" value="0" aria-label="Aulas entregues"></progress><div class="progress-footer"><span id="progress-count">Aguardando conexão</span><span id="progress-extra">Processamento local · Entrega pelo iCloud</span></div></section>
+    <footer>Course Audio <span>Interface na web. Processamento no seu computador.</span><button id="disconnect" type="button" hidden>Desconectar painel</button></footer>
+  </main>
+</div>
+</body>
+</html>

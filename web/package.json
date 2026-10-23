@@ -1,0 +1,13 @@
+{
+  "name": "course-audio-panel",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test model.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "wrangler": "4.152.0"
+  }
+}

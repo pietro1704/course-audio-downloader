@@ -51,3 +51,10 @@ htmlcov/
 
 # Public MIT VAD regression fixture only
 !tests/fixtures/public-speech.wav
+
+# Local web runtime/build and browser evidence
+web/node_modules/
+web/test-results/
+web/playwright-report/
+.web-dist/
+.wrangler/
