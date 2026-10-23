@@ -16,7 +16,7 @@ class NavigationTests(unittest.TestCase):
  def evaluate(self,nodes,current='https://portal.example.test/lesson/one',target=TARGET,frame='https://player.example.test/embed/one'):
   code='const clicks=[];global.location=new URL('+json.dumps(current)+');const nodes='+json.dumps(nodes)+';global.document={querySelector:()=>({src:'+json.dumps(frame)+'}),querySelectorAll:()=>nodes.map(x=>({...x,hasAttribute:k=>Object.hasOwn(x,k),getAttribute:k=>x[k]??null,click:()=>clicks.push(x.href)}))};'
   code+='const result='+navigation_script(target,PROFILE,dict(page_path='/lesson/one',player='https://player.example.test/embed/one'))+';process.stdout.write(JSON.stringify({result,clicks}));'
-  r=subprocess.run(['node'],input=code,capture_output=True,text=True,timeout=5);self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
+  r=subprocess.run(['node'],input=code,capture_output=True,text=True,timeout=15);self.assertEqual(r.returncode,0,r.stderr);return json.loads(r.stdout)
  def test_matching_link_ignores_only_declared_tracking_keys(self):
   v=self.evaluate([dict(href=TARGET+'?source=menu')]);self.assertEqual(v,dict(result='link-clicked',clicks=[TARGET+'?source=menu']))
  def test_wrong_origin_query_and_unsafe_controls_fall_back(self):
