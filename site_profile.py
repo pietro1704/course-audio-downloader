@@ -9,7 +9,7 @@ def load_profile(path):
     value = json.loads(Path(path).read_text())
     if value.get('schema') != 'course-site-profile/v1':
         raise ValueError('unsupported-site-profile')
-    if value.get('mode') not in {'direct', 'embedded-json', 'template-hls'}:
+    if value.get('mode') not in {'direct', 'embedded-json', 'template-hls', 'extractor'}:
         raise ValueError('unsupported-profile-mode')
     origin = urlsplit(value.get('origin', ''))
     if origin.scheme != 'https' or not origin.netloc or origin.path not in {'', '/'} or origin.username or origin.query:
@@ -20,6 +20,10 @@ def load_profile(path):
         player = value.get('player', {})
         for key in ('host_pattern', 'path_pattern', 'manifest_url'):
             if not player.get(key): raise ValueError('incomplete-player-profile')
+    if value['mode'] == 'extractor':
+        pattern = value.get('extractor', {}).get('url_pattern', '')
+        if 'id' not in re.compile(pattern).groupindex:
+            raise ValueError('extractor-pattern-missing-identity')
     return value
 
 

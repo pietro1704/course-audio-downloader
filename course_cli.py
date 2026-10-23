@@ -9,6 +9,7 @@ from pathlib import Path
 from browser_adapter import SafariAdapter
 from embedded_adapter import EmbeddedAdapter
 from template_adapter import TemplateAdapter
+from extractor_adapter import ExtractorAdapter
 from course_catalog import load_lessons,relative_audio_path
 from site_profile import load_profile
 from cloud_delivery import Delivery,NativeCloud,Progress
@@ -17,7 +18,7 @@ from icloud_bridge import uploaded
 
 
 def build_adapter(profile,encoder='aac_at'):
-    cls={'direct':SafariAdapter,'embedded-json':EmbeddedAdapter,'template-hls':TemplateAdapter}[profile['mode']]
+    cls={'direct':SafariAdapter,'embedded-json':EmbeddedAdapter,'template-hls':TemplateAdapter,'extractor':ExtractorAdapter}[profile['mode']]
     return cls(profile=profile,encoder=encoder)
 
 
