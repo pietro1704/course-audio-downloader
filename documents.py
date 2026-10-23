@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import threading
@@ -43,9 +44,34 @@ def document_resource(raw):
         ident=hashlib.sha256(url.encode()).hexdigest()
     if not isinstance(ident,str) or not ident:raise ValueError('invalid-document-identity')
     value['id']=ident
+    if 'shared_path_with' in value or 'shared_file_sha256' in value:
+        peers=value.get('shared_path_with');digest=value.get('shared_file_sha256')
+        if (not isinstance(peers,list) or not peers or
+                any(not isinstance(peer,str) or not peer or peer==ident for peer in peers) or
+                len(set(peers))!=len(peers) or not isinstance(digest,str) or
+                not re.fullmatch('[0-9a-f]{64}',digest)):
+            raise ValueError('invalid-shared-document-permission')
     size=value.get('size')
     if size is not None and (type(size) is not int or size<0):raise ValueError('invalid-document-size')
     return value
+
+
+def validate_document_paths(resources):
+    ids=[r['id'] for r in resources]
+    if len(set(ids))!=len(ids):raise ValueError('ambiguous-document-identity-or-path')
+    names={}
+    for resource in resources:
+        if resource.get('name'):
+            key=unicodedata.normalize('NFD',resource['name']).casefold()
+            names.setdefault(key,[]).append(resource)
+    for group in names.values():
+        if len(group)==1 and 'shared_path_with' not in group[0]:continue
+        peers={r['id'] for r in group};hashes={r.get('shared_file_sha256') for r in group}
+        if (len(group)<2 or len({r['name'] for r in group})!=1 or None in hashes or len(hashes)!=1 or
+                any(set(r.get('shared_path_with',[]))!=peers-{r['id']} for r in group)):
+            raise ValueError('ambiguous-document-identity-or-path')
+    if any('shared_path_with' in r and not r.get('name') for r in resources):
+        raise ValueError('invalid-shared-document-permission')
 
 
 def document_preflight(lessons,profile,root,destination,cloud):
@@ -106,6 +132,7 @@ class DocumentDelivery:
         self.journal=json.loads(self.journal_path.read_text()) if self.journal_path.exists() else {}
         self.pages=json.loads(self.pages_path.read_text()) if self.pages_path.exists() else {}
         self.lock=threading.RLock();self.stop=self.publisher._stop
+        self._shared_path_locks={}
         self.event=event or (lambda *args,**kwargs:None)
         self.selected=[];self.failures=[];self.total_lessons=0
 
@@ -145,6 +172,11 @@ class DocumentDelivery:
                 (resource.get('name') is not None and resource['name']!=receipt['name']) or
                 (resource.get('size') is not None and resource['size']!=receipt['size']) or
                 receipt['source_hash']!=receipt['final_hash']):
+            raise ValueError('document-receipt-identity-mismatch')
+        peers=resource.get('shared_path_with',[])
+        if (peers or receipt.get('shared_resource_ids')) and (
+                receipt.get('shared_resource_ids')!=sorted(hashlib.sha256(p.encode()).hexdigest() for p in peers)
+                or receipt['source_hash']!=resource.get('shared_file_sha256')):
             raise ValueError('document-receipt-identity-mismatch')
         return local,target
 
@@ -198,23 +230,40 @@ class DocumentDelivery:
                     if (sum(i.file_size for i in archive.infolist())>1024**3 or
                             not {'[Content_Types].xml',required}<=set(archive.namelist()) or
                             archive.testzip() is not None):raise RuntimeError('invalid-document-format')
+            if resource.get('shared_file_sha256') and digest.hexdigest()!=resource['shared_file_sha256']:
+                raise RuntimeError('document-source-hash-mismatch')
             local.parent.mkdir(parents=True,exist_ok=True)
             if local.resolve()!=local or local.exists():raise RuntimeError('unsafe-document-path')
             # Exclusive link promotion cannot replace a concurrently created file.
             os.link(temporary,local);temporary.unlink()
-            return dict(schema='course-document/v1',identity=self.identity(lesson,resource),state='prepared',
+            receipt=dict(schema='course-document/v1',identity=self.identity(lesson,resource),state='prepared',
                 source_identity=Pipeline.identity(lesson['url']),source_url=lesson['url'],resource_id=hashlib.sha256(resource['id'].encode()).hexdigest(),
                 name=name,site_path=parts,final=str(local),cloud=str(target),size=total,
                 source_hash=digest.hexdigest(),final_hash=digest.hexdigest(),
                 params={'mode':'passthrough','content_type':mime},prepared_at=time.time())
+            if resource.get('shared_path_with'):
+                receipt['shared_resource_ids']=sorted(hashlib.sha256(p.encode()).hexdigest() for p in resource['shared_path_with'])
+            return receipt
         except (KeyboardInterrupt,SystemExit):raise
         except Exception as error:
             allowed={'document-cancelled','document-size-budget-exceeded','disk-reserve','document-size-mismatch',
                 'invalid-document-format','document-login-or-html-response','document-is-media',
-                'insecure-document-redirect','missing-document-filename','untracked-local-document','unsafe-document-path'}
+                'insecure-document-redirect','missing-document-filename','untracked-local-document','unsafe-document-path',
+                'document-source-hash-mismatch'}
             raise RuntimeError(str(error) if str(error) in allowed else 'document-download-failed') from None
 
     def one(self,lesson,resource):
+        if self.stop.is_set():raise RuntimeError('document-cancelled')
+        if resource.get('shared_path_with'):
+            resource=document_resource(resource)
+            key=str(self.paths(lesson,resource['name'])[1])
+            with self.lock:path_lock=self._shared_path_locks.setdefault(key,threading.Lock())
+            with path_lock:
+                if self.stop.is_set():raise RuntimeError('document-cancelled')
+                return self._one(lesson,resource)
+        return self._one(lesson,resource)
+
+    def _one(self,lesson,resource):
         self.status('delivering',title=lesson['title'])
         ident=self.identity(lesson,resource)
         with self.lock:receipt=dict(self.journal[ident]) if ident in self.journal else None
@@ -268,8 +317,7 @@ class DocumentDelivery:
                         try:
                             resources=[r for raw in self.adapter.inventory(lesson) if (r:=document_resource(raw)) is not None]
                             ids=[self.identity(lesson,r) for r in resources]
-                            names=[unicodedata.normalize('NFD',r['name']).casefold() for r in resources if r.get('name')]
-                            if len(set(ids))!=len(ids) or len(set(names))!=len(names):raise ValueError('ambiguous-document-identity-or-path')
+                            validate_document_paths(resources)
                             consecutive_inventory_failures=0
                             selected.extend(ids);self.pages[source]={'source_url':lesson['url'],'resources':ids,'inventory_complete':True}
                             atomic_json(self.pages_path,self.pages)

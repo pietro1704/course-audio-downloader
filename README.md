@@ -124,3 +124,10 @@ aula. `items_expression` retorna uma lista de `{id, name, url, size?, mime?}`;
 somente em memória. Não inclua credenciais no perfil ou no repositório. Recursos
 de áudio e vídeo são excluídos do inventário de documentos. Sessão expirada e
 três falhas consecutivas de inventário encerram a fila preservando os originais.
+
+Se o site apresenta dois anexos idênticos com o mesmo nome, cada recurso pode
+declarar `shared_path_with` com os IDs dos demais e `shared_file_sha256` com o
+SHA-256 esperado. A permissão precisa ser recíproca, com nomes e hashes iguais.
+Cada link continua sendo baixado e validado; a publicação do caminho é
+serializada, preservando as duas identidades e um único arquivo original no
+iCloud. Conteúdo divergente falha sem substituir o arquivo confirmado.
