@@ -21,7 +21,7 @@ Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedd
 
 The bounded pipeline supports 1–8 lessons concurrently, with browser resolution serialized. Audio is AAC-LC mono, 44100 Hz, target 32 kbps. Original attached artwork takes priority; absent artwork falls back to the matching video thumbnail, then allows audio without a cover. Validate actual throughput before increasing concurrency further.
 
-Delivery uses `Documentacao/delivery.lock`, `delivery-journal.json`, `delivery-status.json` and `pipeline-manifest.jsonl`. A verified native iCloud upload is required before deleting the matching original and evicting the local cloud cache. Prepared receipts resume without another download. Cancellation drains submitted tasks and preserves sources. See [delivery details](docs/sequential-icloud.md).
+Delivery uses `Documentacao/delivery.lock`, `delivery-journal.json`, `delivery-status.json` and `pipeline-manifest.jsonl`. A verified native iCloud upload is required before deleting the matching original and evicting the local cloud cache. Prepared receipts resume without another download. A completed no-cover receipt does not repeat its prior optional artwork lookup on restart; use `--refresh-completed-artwork` explicitly to retry missing covers. First-pass embedded artwork and matching-video fallback always run during conversion. Cancellation drains submitted tasks and preserves sources. See [delivery details](docs/sequential-icloud.md).
 
 Run the same regression gate as CI:
 

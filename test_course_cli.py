@@ -136,3 +136,48 @@ class CourseContractsTests(unittest.TestCase):
         native=Mock();native.status.return_value=dict(ubiquitous=True,uploaded=True,uploading=False,conflicts=False,
                        upload_error=False,size=20,mtime_ns=1000,materialized=False)
         self.assertEqual(preflight(load_lessons(catalog),load_profile(profile),root,self.base/'cloud',native)[0]['state'],'uploaded')
+
+
+class CompletedArtworkPolicyTests(unittest.TestCase):
+    setUp = CourseContractsTests.setUp
+    inputs = CourseContractsTests.inputs
+    def invoke(self, refresh=False, failure=None):
+        catalog,profile,lesson=self.inputs('resume')
+        root=self.base/'work';events=[];ident=Pipeline.identity(lesson['url'])
+        with patch('course_cli.Progress') as progress,patch('course_cli.Delivery') as cls,patch('course_cli.build_adapter'),patch('course_cli.NativeCloud'):
+            delivery=cls.return_value
+            delivery.journal={ident:dict(state='complete',artwork={'origin':'none'})}
+            delivery.completed_count.return_value=1
+            delivery.refresh_completed_artwork.side_effect=failure
+            delivery.run.side_effect=lambda *a,**k:events.append('run')
+            args=['--catalog',str(catalog),'--profile',str(profile),'--root',str(root),'--destination',str(self.base/'cloud'),'--icloud-python','python']
+            if refresh:args.append('--refresh-completed-artwork')
+            result=main(args)
+            return result,delivery,events
+
+    def test_default_resume_does_not_retry_completed_artwork(self):
+        result,delivery,events=self.invoke(failure=RuntimeError('embedded-lesson-identity-timeout'))
+        self.assertEqual(result,0);self.assertEqual(events,['run'])
+        delivery.refresh_completed_artwork.assert_not_called()
+        delivery.cancel.assert_not_called()
+
+    def test_explicit_refresh_is_still_available(self):
+        result,delivery,events=self.invoke(refresh=True)
+        self.assertEqual(result,0);delivery.refresh_completed_artwork.assert_called_once()
+        self.assertEqual(events,['run'])
+
+    def test_requested_refresh_failure_and_cancellation_are_not_hidden(self):
+        for error,code in [(RuntimeError('delivery-identity-mismatch'),2),(KeyboardInterrupt(),130)]:
+            result,delivery,events=self.invoke(refresh=True,failure=error)
+            self.assertEqual(result,code);self.assertEqual(events,[])
+            if code==130:delivery.cancel.assert_called_once()
+
+    def test_actual_refresh_rejects_wrong_receipt_before_touching_cloud(self):
+        from cloud_delivery import Delivery
+        catalog,profile,lesson=self.inputs('identity')
+        root=self.base/'work';cloud=self.base/'cloud';native=Mock()
+        d=Delivery(root,cloud,native,adapter=Mock())
+        ident=Pipeline.identity(lesson['url']);d.journal[ident]=dict(schema=1,state='complete',source_identity=ident,title='Wrong lesson',params=PRESET,artwork={'origin':'none'},original=str(root/'originals/source.mp3'),final=str(root/'out.m4a'),cloud=str(cloud/'out.m4a'),source_hash='a'*64)
+        with self.assertRaisesRegex(RuntimeError,'delivery-identity-mismatch'):
+            d.refresh_completed_artwork(lesson,cloud/'out.m4a')
+        native.status.assert_not_called()
