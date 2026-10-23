@@ -19,6 +19,12 @@ Catalogues use `course-catalog/v1`, complete counts and lesson `title`, `url`, `
 
 Profiles use `course-site-profile/v1`, HTTPS `origin` and mode `direct`, `embedded-json`, `template-hls` or `extractor`. Selectors, title suffixes, identity expressions, player patterns and URL templates belong to the local profile. Treat profiles as trusted local code: identity expressions execute read-only JavaScript in Safari. Examples and contracts are documented in [docs/template-profile.md](docs/template-profile.md).
 
+For sites that defer interactive controls in background tabs, set
+`activate_browser_tab: true` together with an explicit `browser_target`. Audio
+and document operations select that existing tab after checking its origin,
+before navigation or inspection. The default leaves the selection unchanged;
+this option does not create windows/tabs or bring Safari to the foreground.
+
 Embedded profiles with `prefer_audio_rendition: true` prefer a dedicated audio
 playlist. If all video variants explicitly reference one URI-less AUDIO rendition
 and declare the same audio codec, resolution instead selects the variant with
