@@ -64,8 +64,15 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(other['status'], 'ok', other)
         self.assertNotEqual(result['source_identity'], other['source_identity'])
         self.assertNotEqual(result['final'], other['final'])
+    def test_literal_colon_is_preserved_in_real_output_path(self):
+        lesson = {'url': 'https://test/course/colon', 'title': 'Aula: 3',
+                  'site_path': ['Example Formation', 'Módulo: Parte 1', 'Aula: 3']}
+        result = self.pipe().one(lesson)
+        self.assertEqual(result['status'], 'ok', result)
+        self.assertEqual(Path(result['final']).relative_to(self.root).parts,
+                         ('Example Formation', 'Módulo: Parte 1', 'Aula: 3.m4a'))
     def test_unsafe_site_names_fail_without_download_or_escape(self):
-        for parts in [['..', 'aula'], ['Semana 01', '../aula'], ['Semana:01', 'aula'],
+        for parts in [['..', 'aula'], ['Semana 01', '../aula'],
                       ['Semana 01', 'a\\b'], ['Semana 01', ''], 'Semana 01']:
             with self.subTest(parts=parts):
                 adapter = Adapter()
