@@ -6,12 +6,11 @@ requires-python = ">=3.11"
 dependencies = []
 [project.scripts]
 course-audio-bot = "course_audio_bot:main"
-ppr-audio = "ppr_cli:main"
-hotmart-audio = "hotmart_cli:main"
+course-deliver = "course_cli:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_audio_bot", "pipeline", "ppr_cli", "hotmart_cli", "ppr_bunny"]
+py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter"]
 
 [build-system]
 requires = ["setuptools>=68"]

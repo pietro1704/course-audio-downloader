@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from pipeline import Candidate, Pipeline
-from ppr_cli import SafariAdapter
+from browser_adapter import SafariAdapter
 
 class ExtensionlessTests(unittest.TestCase):
     def test_named_mp3_download_control_accepts_extensionless_cdn(self):
@@ -18,7 +18,7 @@ class ExtensionlessTests(unittest.TestCase):
                 return destination
         with tempfile.TemporaryDirectory() as tmp:
             adapter=Adapter()
-            result=Pipeline(tmp,adapter,reserve_bytes=0).one({'url':'https://padrepauloricardo.org/aulas/example','title':'Example'})
+            result=Pipeline(tmp,adapter,reserve_bytes=0).one({'url':'https://lessons.example.test/aulas/example','title':'Example'})
             self.assertEqual(result['status'],'failed')
             self.assertEqual(adapter.destination.suffix,'.mp3')
             sources=list(Path(tmp).rglob('*.mp3'))

@@ -22,6 +22,16 @@ jobs:
       - name: Repository hygiene check
         run: |
           git ls-files
-          ! git ls-files | grep -E '(^|/)(config(\..*)?\.toml|.*cookies.*|.*inventory.*|.*report.*|logs/|.*\.mp3|.*\.m4a|.*\.mp4)$'
-          ! grep -RInE '(gho_[A-Za-z0-9_]+|192\.168\.|cookies_file\s*=\s*"[^"]*(real|private|personal|prod)[^"]*")' -- . \
-            --exclude-dir=.git --exclude='.gitignore'
+          python - <<'PYTHON'
+          import re
+          import subprocess
+          paths = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          private = re.compile(r'(^|/)(config(\..*)?\.toml|.*cookies.*|.*inventory.*|.*report.*|logs/.*|.*\.(mp3|m4a|mp4))$')
+          rejected = [p for p in paths if p != 'config.example.toml' and private.search(p)]
+          if rejected:
+              raise SystemExit('Private/generated tracked paths: ' + ', '.join(rejected))
+          pattern = r'(gho_[A-Za-z0-9_]+|192\.168\.|cookies_file\s*=\s*"[^"]*(real|private|personal|prod)[^"]*")'
+          result = subprocess.run(['git', 'grep', '-nE', pattern, '--', '.', ':!.gitignore'])
+          if result.returncode != 1:
+              raise SystemExit('Secret scan matched or failed')
+          PYTHON
