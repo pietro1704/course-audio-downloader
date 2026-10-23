@@ -1,7 +1,7 @@
 """Resumable original-document delivery, independent of audio completion."""
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from email.message import Message
-import fcntl
+import portable_lock as fcntl
 import hashlib
 import json
 import os
@@ -124,6 +124,76 @@ def document_preflight(lessons,profile,root,destination,cloud):
     return rows
 
 
+
+def download_document(lesson,resource,url,root,path_for_name,stop,*,max_bytes=512*1024**2,reserve_bytes=4*1024**3,urlopen=None):
+    """Prepare original bytes locally, with no publication or cleanup side effects."""
+    if stop.is_set():raise RuntimeError('document-cancelled')
+    p=urlsplit(url)
+    if p.scheme!='https' or not p.hostname or p.username or p.password:raise ValueError('invalid-document-url')
+    staging=root/'.document-staging';staging.mkdir(exist_ok=True)
+    if staging.resolve()!=staging:raise ValueError('unsafe-document-path')
+    temporary=staging/(uuid.uuid4().hex+'.partial');total=0;digest=hashlib.sha256()
+    expected=resource.get('size')
+    if expected is not None and expected>max_bytes:raise RuntimeError('document-size-budget-exceeded')
+    try:
+        request=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':lesson['url']})
+        with (urlopen or urllib.request.urlopen)(request,timeout=60) as response,temporary.open('xb') as output:
+            end=urlsplit(response.geturl())
+            if end.scheme!='https' or end.username or end.password:raise RuntimeError('insecure-document-redirect')
+            mime=response.headers.get_content_type()
+            if mime in ('text/html','application/xhtml+xml'):raise RuntimeError('document-login-or-html-response')
+            if mime.startswith(('audio/','video/')):raise RuntimeError('document-is-media')
+            declared=int(response.headers.get('Content-Length') or 0)
+            if declared>max_bytes:raise RuntimeError('document-size-budget-exceeded')
+            name=resource.get('name')
+            if not name:
+                header=Message();header['Content-Disposition']=response.headers.get('Content-Disposition','')
+                name=header.get_filename() or unquote(urlsplit(url).path.rsplit('/',1)[-1])
+            if not name:raise RuntimeError('missing-document-filename')
+            local=path_for_name(name)
+            if local.exists():raise RuntimeError('untracked-local-document')
+            while True:
+                if stop.is_set():raise RuntimeError('document-cancelled')
+                chunk=response.read(65536)
+                if not chunk:break
+                total+=len(chunk)
+                if total>max_bytes:raise RuntimeError('document-size-budget-exceeded')
+                if shutil.disk_usage(root).free-len(chunk)<reserve_bytes:
+                    raise RuntimeError('disk-reserve')
+                digest.update(chunk);output.write(chunk)
+            output.flush();os.fsync(output.fileno())
+        if (not total or (declared and total!=declared) or
+                (expected is not None and total!=expected)):raise RuntimeError('document-size-mismatch')
+        if Path(name).suffix.lower()=='.pdf':
+            with temporary.open('rb') as stream:
+                if stream.read(5)!=b'%PDF-':raise RuntimeError('invalid-document-format')
+                stream.seek(max(0,total-4096))
+                if b'%%EOF' not in stream.read():raise RuntimeError('invalid-document-format')
+        required={'.docx':'word/document.xml','.xlsx':'xl/workbook.xml','.pptx':'ppt/presentation.xml'}.get(Path(name).suffix.lower())
+        if required:
+            with zipfile.ZipFile(temporary) as archive:
+                if (sum(i.file_size for i in archive.infolist())>1024**3 or
+                        not {'[Content_Types].xml',required}<=set(archive.namelist()) or
+                        archive.testzip() is not None):raise RuntimeError('invalid-document-format')
+        if resource.get('shared_file_sha256') and digest.hexdigest()!=resource['shared_file_sha256']:
+            raise RuntimeError('document-source-hash-mismatch')
+        local.parent.mkdir(parents=True,exist_ok=True)
+        if local.resolve()!=local or local.exists():raise RuntimeError('unsafe-document-path')
+        # Exclusive link promotion cannot replace a concurrently created file.
+        os.link(temporary,local);temporary.unlink()
+        return dict(name=name,final=str(local),size=total,source_hash=digest.hexdigest(),final_hash=digest.hexdigest(),params={'mode':'passthrough','content_type':mime},prepared_at=time.time())
+    except (KeyboardInterrupt,SystemExit):raise
+    except urllib.error.HTTPError as error:
+        raise DocumentHTTPError(error.code) from None
+    except Exception as error:
+        allowed={'document-cancelled','document-size-budget-exceeded','disk-reserve','document-size-mismatch',
+            'invalid-document-format','document-login-or-html-response','document-is-media',
+            'insecure-document-redirect','missing-document-filename','untracked-local-document','unsafe-document-path',
+            'document-source-hash-mismatch'}
+        raise RuntimeError(str(error) if str(error) in allowed else 'document-download-failed') from None
+
+
+
 class DocumentDelivery:
     def __init__(self, root, destination, cloud, adapter, concurrency=3,
                  reserve_bytes=4*1024**3, max_bytes=512*1024**2, event=None,
@@ -215,78 +285,17 @@ class DocumentDelivery:
         return local,target
 
     def download(self,lesson,resource):
-        if self.stop.is_set():raise RuntimeError('document-cancelled')
-        url=self.adapter.url_for(lesson,resource)
-        p=urlsplit(url)
-        if p.scheme!='https' or not p.hostname or p.username or p.password:raise ValueError('invalid-document-url')
-        staging=self.root/'.document-staging';staging.mkdir(exist_ok=True)
-        if staging.resolve()!=staging:raise ValueError('unsafe-document-path')
-        temporary=staging/(uuid.uuid4().hex+'.partial');total=0;digest=hashlib.sha256()
-        expected=resource.get('size')
-        if expected is not None and expected>self.max_bytes:raise RuntimeError('document-size-budget-exceeded')
-        try:
-            request=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':lesson['url']})
-            with urllib.request.urlopen(request,timeout=60) as response,temporary.open('xb') as output:
-                end=urlsplit(response.geturl())
-                if end.scheme!='https' or end.username or end.password:raise RuntimeError('insecure-document-redirect')
-                mime=response.headers.get_content_type()
-                if mime in ('text/html','application/xhtml+xml'):raise RuntimeError('document-login-or-html-response')
-                if mime.startswith(('audio/','video/')):raise RuntimeError('document-is-media')
-                declared=int(response.headers.get('Content-Length') or 0)
-                if declared>self.max_bytes:raise RuntimeError('document-size-budget-exceeded')
-                name=resource.get('name')
-                if not name:
-                    header=Message();header['Content-Disposition']=response.headers.get('Content-Disposition','')
-                    name=header.get_filename() or unquote(urlsplit(url).path.rsplit('/',1)[-1])
-                if not name:raise RuntimeError('missing-document-filename')
-                parts,local,target=self.paths(lesson,name)
-                if local.exists():raise RuntimeError('untracked-local-document')
-                while True:
-                    if self.stop.is_set():raise RuntimeError('document-cancelled')
-                    chunk=response.read(65536)
-                    if not chunk:break
-                    total+=len(chunk)
-                    if total>self.max_bytes:raise RuntimeError('document-size-budget-exceeded')
-                    if shutil.disk_usage(self.root).free-len(chunk)<self.publisher.reserve_bytes:
-                        raise RuntimeError('disk-reserve')
-                    digest.update(chunk);output.write(chunk)
-                output.flush();os.fsync(output.fileno())
-            if (not total or (declared and total!=declared) or
-                    (expected is not None and total!=expected)):raise RuntimeError('document-size-mismatch')
-            if Path(name).suffix.lower()=='.pdf':
-                with temporary.open('rb') as stream:
-                    if stream.read(5)!=b'%PDF-':raise RuntimeError('invalid-document-format')
-                    stream.seek(max(0,total-4096))
-                    if b'%%EOF' not in stream.read():raise RuntimeError('invalid-document-format')
-            required={'.docx':'word/document.xml','.xlsx':'xl/workbook.xml','.pptx':'ppt/presentation.xml'}.get(Path(name).suffix.lower())
-            if required:
-                with zipfile.ZipFile(temporary) as archive:
-                    if (sum(i.file_size for i in archive.infolist())>1024**3 or
-                            not {'[Content_Types].xml',required}<=set(archive.namelist()) or
-                            archive.testzip() is not None):raise RuntimeError('invalid-document-format')
-            if resource.get('shared_file_sha256') and digest.hexdigest()!=resource['shared_file_sha256']:
-                raise RuntimeError('document-source-hash-mismatch')
-            local.parent.mkdir(parents=True,exist_ok=True)
-            if local.resolve()!=local or local.exists():raise RuntimeError('unsafe-document-path')
-            # Exclusive link promotion cannot replace a concurrently created file.
-            os.link(temporary,local);temporary.unlink()
-            receipt=dict(schema='course-document/v1',identity=self.identity(lesson,resource),state='prepared',
-                source_identity=Pipeline.identity(lesson['url']),source_url=lesson['url'],resource_id=hashlib.sha256(resource['id'].encode()).hexdigest(),
-                name=name,site_path=parts,final=str(local),cloud=str(target),size=total,
-                source_hash=digest.hexdigest(),final_hash=digest.hexdigest(),
-                params={'mode':'passthrough','content_type':mime},prepared_at=time.time())
-            if resource.get('shared_path_with'):
-                receipt['shared_resource_ids']=sorted(hashlib.sha256(p.encode()).hexdigest() for p in resource['shared_path_with'])
-            return receipt
-        except (KeyboardInterrupt,SystemExit):raise
-        except urllib.error.HTTPError as error:
-            raise DocumentHTTPError(error.code) from None
-        except Exception as error:
-            allowed={'document-cancelled','document-size-budget-exceeded','disk-reserve','document-size-mismatch',
-                'invalid-document-format','document-login-or-html-response','document-is-media',
-                'insecure-document-redirect','missing-document-filename','untracked-local-document','unsafe-document-path',
-                'document-source-hash-mismatch'}
-            raise RuntimeError(str(error) if str(error) in allowed else 'document-download-failed') from None
+        prepared=download_document(lesson,resource,self.adapter.url_for(lesson,resource),self.root,
+            lambda name:self.paths(lesson,name)[1],self.stop,max_bytes=self.max_bytes,
+            reserve_bytes=self.publisher.reserve_bytes)
+        parts,local,target=self.paths(lesson,prepared['name'])
+        receipt=dict(schema='course-document/v1',identity=self.identity(lesson,resource),state='prepared',
+            source_identity=Pipeline.identity(lesson['url']),source_url=lesson['url'],
+            resource_id=hashlib.sha256(resource['id'].encode()).hexdigest(),site_path=parts,
+            cloud=str(target),**prepared)
+        if resource.get('shared_path_with'):
+            receipt['shared_resource_ids']=sorted(hashlib.sha256(p.encode()).hexdigest() for p in resource['shared_path_with'])
+        return receipt
 
     def one(self,lesson,resource):
         if self.stop.is_set():raise RuntimeError('document-cancelled')

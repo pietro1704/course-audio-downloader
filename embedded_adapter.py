@@ -71,6 +71,10 @@ class EmbeddedAdapter(SafariAdapter):
         while time.monotonic()<deadline:
             try:page=self._eval_embedded()
             except (ValueError,RuntimeError,subprocess.TimeoutExpired):time.sleep(.5);continue
+            direct=[c for c in self.candidates(page,self.profile) if c.kind in {'mp3','audio'}]
+            if direct and page.get('auth') and canonical(page.get('url',''),self.profile)==canonical(lesson['url'],self.profile):
+                # Reuse the direct adapter's full title, page and candidate stability guards.
+                return SafariAdapter.resolve(self,lesson)
             frames=page.get('iframes',[]);src=frames[0] if frames else '';player=self.profile.get('player',{})
             allowed=(urlsplit(src).scheme=='https' and re.fullmatch(player.get('host_pattern',r'(?!)'),urlsplit(src).hostname or ''))
             matches=(page.get('ready')=='complete' and canonical(page.get('url',''),self.profile)==canonical(lesson['url'],self.profile) and

@@ -27,6 +27,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install authenticated renderer
+        timeout-minutes: 5
+        run: uv run playwright install chromium
       - name: Tests
         run: uv run python -m unittest -v
       - name: Repository hygiene check
@@ -36,7 +39,7 @@ jobs:
           import re
           import subprocess
           paths = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
-          private = re.compile(r'(^|/)(config(\..*)?\.toml|.*cookies.*|.*inventory.*|.*report.*|logs/.*|.*\.(mp3|m4a|mp4))$')
+          private = re.compile(r'(^|/)(config(\..*)?\.toml|.*cookies.*|.*inventory.*|.*report.*|logs/.*|.*\.(mp3|m4a|mp4|pdf|epub|docx?|xlsx?|pptx?|zip))$')
           rejected = [p for p in paths if p != 'config.example.toml' and private.search(p)]
           if rejected:
               raise SystemExit('Private/generated tracked paths: ' + ', '.join(rejected))
@@ -45,3 +48,59 @@ jobs:
           if result.returncode != 1:
               raise SystemExit('Secret scan matched or failed')
           PYTHON
+
+  portable-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install FFmpeg on Linux
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y ffmpeg
+          fi
+          ffmpeg -version
+      - name: Install FFmpeg on macOS and Windows
+        if: runner.os != 'Linux'
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install Python dependencies
+        run: uv sync --python 3.12 --locked
+      - name: Install authenticated renderer
+        timeout-minutes: 5
+        run: uv run playwright install chromium
+      - name: URL CLI, browser session and local website regressions
+        run: uv run python -m unittest -v test_authenticated_browser test_automatic_site test_course_discovery test_local_course test_local_portal test_local_portal_ui test_url_cli
+
+  web-browsers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install FFmpeg
+        timeout-minutes: 5
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y ffmpeg
+          fi
+      - run: uv sync --python 3.12 --locked
+      - name: Install website browser engines
+        timeout-minutes: 5
+        run: uv run playwright install --with-deps chromium firefox webkit
+      - name: Website in Chromium, Firefox and WebKit
+        env:
+          COURSE_TEST_WEB_ENGINES: chromium,firefox,webkit
+        run: uv run python -m unittest -v test_local_portal_ui

@@ -87,7 +87,7 @@ class Pipeline:
     def records(self):
         out = {}
         if self.manifest.exists():
-            for line in self.manifest.read_text().splitlines():
+            for line in self.manifest.read_text(encoding='utf-8').splitlines():
                 try:
                     record = json.loads(line)
                     key = record['source_identity']

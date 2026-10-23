@@ -20,6 +20,8 @@ class DocumentBrowser(SafariAdapter):
 
     def _matches(self,page,lesson):
         titles={self._title(lesson[k]) for k in ('title','page_title','provider_title') if lesson.get(k)}
+        if type(lesson.get('number')) is int and lesson['number']>0:
+            titles.add(self._title(str(lesson['number'])+'. '+lesson['title']))
         ready_states={'complete','interactive'} if self.profile.get('documents',{}).get('ready_expression') else {'complete'}
         return (canonical(page.get('url',''),self.profile)==canonical(lesson['url'],self.profile) and
                 (not page.get('canonical') or canonical(page['canonical'],self.profile)==canonical(lesson['url'],self.profile)) and

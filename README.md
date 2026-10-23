@@ -1,10 +1,63 @@
 # Course audio downloader
 
-Personal downloader for courses you can access in an authenticated browser. Site contracts and course identities are input data; the application contains no course-specific adapters.
+Personal downloader for courses you can access in an authenticated browser. The URL workflow discovers the curriculum from the authenticated page; advanced delivery also accepts private site profiles.
 
-Requires Python 3.11+, ffmpeg/ffprobe and an authenticated Safari session with JavaScript from Apple Events enabled. Native iCloud delivery requires macOS and a Python environment with PyObjC Foundation.
+The URL CLI and local website target Windows, Linux and macOS. They require Python 3.11+, ffmpeg/ffprobe and the managed Chromium renderer. Private cookies are read from the browser where you are signed in. Native iCloud delivery remains specific to macOS with PyObjC Foundation.
 
-Install with `uv sync`, then use `uv run course-deliver`. Keep private catalogues and site profiles outside the repository.
+Install with `uv sync --python 3.12` and `uv run playwright install chromium`, then pass only the course URL:
+
+```sh
+uv run course-deliver https://courses.example.test/course/intro
+# Preserve original pauses instead:
+uv run course-deliver --no-silence-removal https://courses.example.test/course/intro
+# Open the local website using the same Python engine:
+uv run course-site
+```
+
+The URL workflow passes only cookies matching the requested course site to its
+renderer in memory. Cookie readers may use private temporary copies of locked browser databases. It tries installed browser profiles and can use Chrome, Chromium, Edge,
+Brave, Firefox, LibreWolf, Opera, Vivaldi and Safari where the operating system
+allows access to their cookie stores. It does not control Safari tabs, export
+cookies, or require manual JSON/API keys. `COURSE_BROWSER` optionally selects a
+browser. Locked, encrypted or inaccessible sessions require signing in/unlocking
+the source browser; cookies cannot bypass subscription or DRM requirements.
+The internal renderer runs on its own thread so the CLI and website share the
+same discovery, download and processing behavior.
+
+Curriculum discovery uses lesson links, repeated module containers, headings and
+page metadata rather than public course catalogs or provider-specific profiles.
+A lesson URL with a visible curriculum is accepted. Different navigation or
+private APIs can still require improvements to the generic discovery logic;
+cookies provide authentication rather than a universal curriculum schema.
+For larger courses the index is returned first; attachments on the entry lesson
+are listed, and remaining lesson inventories are checked during download. They
+are never represented as confirmed empty inventories.
+
+`course-deliver --inspect URL` discovers metadata without downloading media or
+attachments. The website opens its session automatically at
+`http://127.0.0.1:8788`. The advanced profile workflow below preserves its existing
+Safari and native iCloud integration.
+
+The URL workflow discovers lessons and downloads their available attachments,
+preferring a directly offered MP3 over extracting audio from video. Protected
+silence removal is enabled by default and `--no-silence-removal` disables it.
+Output audio retains the existing AAC/M4A preset (native AAC on macOS, FFmpeg AAC elsewhere); downloaded originals are kept.
+Display titles stay literal; local filenames replace characters forbidden on Windows. Files default to `~/Downloads/Course Audio`; `COURSE_AUDIO_ROOT` optionally changes
+that directory. Opt-out runs use a separate `Pausas originais` directory so they
+do not reuse edited receipts. A changed source/output or silence profile fails
+safely; repeated matching runs resume without editing twice. No iCloud publishing
+or cleanup runs in this local workflow.
+
+The website lists discovered lessons, modules and attachment names alongside their lessons.
+Download an individual lesson, module or whole course. Each verified processed
+audio becomes playable while later lessons are downloading, using HTTP Range
+requests. With silence removal enabled, playback waits for that lesson's edited
+and validated output; it does not play the unprocessed source. The final ZIP
+contains audio outputs and attachments. Cancellation preserves originals and
+completed files, and never advertises an incomplete ZIP. This server binds only
+to loopback and does not deploy to Cloudflare or require a paid service.
+
+For advanced iCloud delivery, keep private catalogues and profiles outside the repository:
 
 ```sh
 course-deliver --catalog /path/to/course-catalog.json \
