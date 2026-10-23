@@ -17,7 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        timeout-minutes: 5
+        run: bash .github/scripts/install-ffmpeg.sh
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Set up Python
@@ -64,12 +65,7 @@ jobs:
       - name: Install FFmpeg on Linux
         if: runner.os == 'Linux'
         timeout-minutes: 5
-        run: |
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
-            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y ffmpeg
-          fi
-          ffmpeg -version
+        run: bash .github/scripts/install-ffmpeg.sh
       - name: Install FFmpeg on macOS and Windows
         if: runner.os != 'Linux'
         uses: FedericoCarboni/setup-ffmpeg@v3
@@ -91,11 +87,7 @@ jobs:
           node-version: 22
       - name: Install FFmpeg
         timeout-minutes: 5
-        run: |
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
-            sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y ffmpeg
-          fi
+        run: bash .github/scripts/install-ffmpeg.sh
       - run: uv sync --python 3.12 --locked
       - name: Install website browser engines
         timeout-minutes: 5
