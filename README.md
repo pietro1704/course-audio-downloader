@@ -36,6 +36,13 @@ unchanged; this option does not rewrite stored receipts or bypass page checks.
 
 The bounded pipeline supports 1–8 lessons concurrently, with browser resolution serialized. Audio is AAC-LC mono, 44100 Hz, target 32 kbps. Original attached artwork takes priority; absent artwork falls back to the matching video thumbnail, then allows audio without a cover. Validate actual throughput before increasing concurrency further.
 
+Live CLI runs admit workers against available disk before submission: each uses
+the pipeline's 512 MiB source budget, with the configured reserve and an extra
+256 MiB of headroom. `--concurrency` remains the upper bound, and status retains
+both requested and admitted counts. Per-file space checks still apply. With
+insufficient space for one new source, its existing reserve check fails safely;
+prepared receipts may still finish uploading and release their local copies.
+
 Repeated source bytes across distinct lessons are rejected by default. When the
 site intentionally reuses a recording, each affected catalogue lesson may list
 the other lesson URLs in `shared_source_with`. Permissions must be reciprocal
