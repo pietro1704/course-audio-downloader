@@ -17,6 +17,7 @@ from pathlib import Path
 import course_audio_bot as audio
 import artwork
 from icloud_bridge import uploaded
+from file_delivery import FilePublisher
 from pipeline import Pipeline, PRESET
 from browser_adapter import SafariAdapter, load_lessons, normalize_title
 
@@ -83,7 +84,7 @@ class ObservedAdapter:
         return fallback(candidate, folder) if fallback else None
 
 
-class Delivery:
+class Delivery(FilePublisher):
     def __init__(self, root, destination, cloud, adapter=None, reserve_bytes=4 * 1024**3,
                  upload_timeout=900, poll_seconds=3, event=None, concurrency=1):
         self.root = Path(root).resolve()
@@ -211,62 +212,7 @@ class Delivery:
         self.save(receipt)
         return receipt
 
-    def publish(self, receipt):
-        final, target = Path(receipt['final']), Path(receipt['cloud'])
-        self.event('copy-to-icloud')
-        if target.exists():
-            if Pipeline.sha256(target) != receipt['final_hash']:
-                raise RuntimeError('cloud-destination-conflict')
-            return
-        if not final.is_file() or Pipeline.sha256(final) != receipt['final_hash']:
-            raise RuntimeError('local-final-hash-mismatch')
-        if shutil.disk_usage(self.root).free - receipt['size'] < self.reserve_bytes:
-            raise RuntimeError('disk-reserve')
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name('.course-' + uuid.uuid4().hex + '.partial')
-        try:
-            with final.open('rb') as source, temporary.open('xb') as output:
-                shutil.copyfileobj(source, output)
-                output.flush()
-                os.fsync(output.fileno())
-            if Pipeline.sha256(temporary) != receipt['final_hash']:
-                raise RuntimeError('cloud-copy-hash-mismatch')
-            if sys.platform == 'darwin':
-                import ctypes
-                native = ctypes.CDLL(None, use_errno=True)
-                if native.renamex_np(os.fsencode(temporary), os.fsencode(target), 4):
-                    raise RuntimeError('cloud-exclusive-promotion-failed')
-            else:
-                os.link(temporary, target)  # Refuse replacing an existing destination.
-                temporary.unlink()
-        finally:
-            temporary.unlink(missing_ok=True)
 
-    def confirm(self, receipt):
-        target = Path(receipt['cloud'])
-        self.event('wait-for-upload')
-        deadline = time.monotonic() + self.upload_timeout
-        while True:
-            status = self.cloud.status(target)
-            if status.get('upload_error') or status.get('conflicts'):
-                raise RuntimeError('icloud-upload-error-or-conflict')
-            if uploaded(status):
-                if status['size'] != receipt['size']:
-                    raise RuntimeError('cloud-size-mismatch')
-                if status.get('materialized'):
-                    if Pipeline.sha256(target) != receipt['final_hash']:
-                        raise RuntimeError('cloud-final-hash-mismatch')
-                # iCloud round-trips timestamps through floating-point dates;
-                # eviction on the live Mac shifted nanoseconds without changing bytes.
-                elif abs(receipt.get('uploaded_mtime_ns', receipt.get('published_mtime_ns', -10**30))
-                         - status['mtime_ns']) > 1000:
-                    raise RuntimeError('cloud-receipt-metadata-mismatch')
-                return status
-            if self._stop.is_set():
-                raise RuntimeError('delivery-cancelled')
-            if time.monotonic() >= deadline:
-                raise RuntimeError('icloud-upload-timeout')
-            time.sleep(self.poll_seconds)
 
     def cleanup(self, receipt):
         self.event('cleanup-local')

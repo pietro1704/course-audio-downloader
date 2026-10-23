@@ -141,7 +141,7 @@ class TemplateTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as td:
                 root = Path(td); cat, _ = self.catalog(root)
                 args = ['--profile', str(root/'profile.json'), '--catalog', str(cat), '--root', str(root/'work'), '--destination', str(root/'cloud'), '--icloud-python', 'python']
-                with patch('course_cli.Delivery') as cls, patch('course_cli.NativeCloud'), patch('builtins.print'):
+                with patch('course_cli.Delivery') as cls, patch('course_cli.NativeCloud'), patch('course_cli.DocumentDelivery'), patch('builtins.print'):
                     cls.return_value.completed_count.return_value = 0
                     cls.return_value.run.side_effect = failure
                     self.assertEqual(main(args), expected)
@@ -156,7 +156,7 @@ class TemplateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); cat, _ = self.catalog(root)
             args = ['--profile', str(root/'profile.json'), '--catalog', str(cat), '--root', str(root/'work'), '--destination', str(root/'cloud'), '--icloud-python', 'python', '--refresh-completed-artwork']
-            with patch('course_cli.Delivery') as cls, patch('course_cli.NativeCloud'), patch('builtins.print'):
+            with patch('course_cli.Delivery') as cls, patch('course_cli.NativeCloud'), patch('course_cli.DocumentDelivery'), patch('builtins.print'):
                 cls.return_value.completed_count.return_value = 1
                 cls.return_value.journal = {Pipeline.identity(URL): dict(state='complete', artwork={'origin':'none'})}
                 def refresh(*args): cls.call_args.kwargs['event']('wait-for-upload')

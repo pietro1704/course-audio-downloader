@@ -8,7 +8,7 @@ from pipeline import Pipeline
 def path_parts(parts):
     if (not isinstance(parts, list) or len(parts) < 2 or
             any(not isinstance(p, str) or not p or p in {'.', '..'} or
-                any(c in p for c in '/\\\x00:') for p in parts)):
+                any(c in p for c in '/\\\x00') for p in parts)):
         raise ValueError('invalid-site-path')
     return parts
 
