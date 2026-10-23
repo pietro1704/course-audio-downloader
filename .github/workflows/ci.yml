@@ -5,6 +5,13 @@ on:
   pull_request:
 
 jobs:
+  native-cloud:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Native Foundation boundary
+        run: uv run --python 3.11 --with pyobjc-framework-Cocoa python -m unittest -v test_icloud_bridge test_native_cloud
   test:
     runs-on: ubuntu-latest
     steps:

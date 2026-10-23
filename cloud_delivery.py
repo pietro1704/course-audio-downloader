@@ -44,8 +44,23 @@ def atomic_json(path, value):
 class NativeCloud:
     def __init__(self, python):
         self.python = str(python)
+        self._native=None
+        if Path(self.python).absolute()==Path(sys.executable).absolute():
+            try:
+                import Foundation,objc
+                self._native=(Foundation,objc.autorelease_pool)
+            except (ImportError,AttributeError):pass
 
     def call(self, operation, path):
+        if self._native is not None:
+            from icloud_bridge import status,evict
+            foundation,pool=self._native
+            try:
+                with pool():
+                    if operation=='status':return status(path,foundation)
+                    if operation=='evict':return evict(path)
+                    raise ValueError('unsupported-icloud-operation')
+            except Exception:raise RuntimeError('icloud-native-query-failed') from None
         result = subprocess.run([self.python, str(Path(__file__).with_name('icloud_bridge.py')),
                                  operation, str(path)], capture_output=True, text=True, timeout=60)
         try:
