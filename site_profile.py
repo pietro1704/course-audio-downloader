@@ -24,8 +24,33 @@ def load_profile(path):
         pattern = value.get('extractor', {}).get('url_pattern', '')
         if 'id' not in re.compile(pattern).groupindex:
             raise ValueError('extractor-pattern-missing-identity')
+    validate_url_path_aliases(value)
     validate_navigation(value)
     return value
+
+
+def validate_url_path_aliases(profile):
+    aliases = profile.get('url_path_prefix_aliases', {})
+    if not isinstance(aliases, dict):
+        raise ValueError('invalid-url-path-prefix-aliases')
+    for source, target in aliases.items():
+        for prefix in (source, target):
+            if (not isinstance(prefix, str) or len(prefix) < 3 or
+                    not prefix.startswith('/') or not prefix.endswith('/') or
+                    any(c in prefix for c in ('?', '#', '\\', '//')) or
+                    any(ord(c) <= 32 for c in prefix) or
+                    any(part in {'.', '..'} for part in prefix.split('/'))):
+                raise ValueError('invalid-url-path-prefix-aliases')
+        if target in aliases and aliases[target] != target:
+            raise ValueError('chained-url-path-prefix-aliases')
+
+
+def normalized_url_path(path, profile):
+    aliases = profile.get('url_path_prefix_aliases', {})
+    for prefix in sorted(aliases, key=len, reverse=True):
+        if path.startswith(prefix):
+            return aliases[prefix] + path[len(prefix):]
+    return path
 
 
 def inspection_script(profile):
