@@ -23,7 +23,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
       - name: Sync
-        run: uv sync
+        run: uv sync --extra silence
       - uses: actions/setup-node@v4
         with:
           node-version: 22
