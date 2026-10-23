@@ -19,6 +19,7 @@ from cloud_delivery import atomic_json
 from course_catalog import path_parts
 from file_delivery import FilePublisher
 from pipeline import Pipeline
+from transfer_errors import failure_reason
 
 MEDIA_SUFFIXES = {'.mp3','.m4a','.aac','.wav','.ogg','.opus','.mp4','.mkv','.webm','.m3u8'}
 
@@ -249,7 +250,8 @@ class DocumentDelivery:
             for f in done:
                 owner=futures.pop(f)
                 try:f.result()
-                except Exception:failures.append(owner);self.status('delivering')
+                except Exception as error:
+                    failures.append(owner);self.status('delivering',reason=failure_reason(error),failure_source_identity=owner)
         with (self.docs/'documents.lock').open('a') as runlock:
             try:fcntl.flock(runlock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:raise RuntimeError('another-document-run-is-active') from None
@@ -278,14 +280,15 @@ class DocumentDelivery:
                         except KeyboardInterrupt:raise
                         except Exception as error:
                             consecutive_inventory_failures+=1
-                            failures.append(source);self.pages[source]={'source_url':lesson['url'],'inventory_complete':False};atomic_json(self.pages_path,self.pages)
-                            self.status('inventory-failed',title=lesson['title'])
+                            failures.append(source);self.pages[source]={'source_url':lesson['url'],'inventory_complete':False,
+                                'reason':failure_reason(error),'failed_at':time.time()};atomic_json(self.pages_path,self.pages)
+                            self.status('inventory-failed',title=lesson['title'],reason=failure_reason(error))
                             if str(error)=='login-required':self.cancel();raise RuntimeError('login-required') from None
                             if consecutive_inventory_failures>=3:
                                 self.cancel();raise RuntimeError('repeated-document-inventory-failure') from None
                     if futures:collect(wait(futures)[0])
                 except KeyboardInterrupt:self.cancel();self.status('interrupted');raise
-                except Exception:self.cancel();self.status('failed');raise
+                except Exception as error:self.cancel();self.status('failed',reason=failure_reason(error));raise
         report={'ok':not failures,'lessons':len(lessons),'inventoried':sum(self.pages.get(Pipeline.identity(l['url']),{}).get('inventory_complete',False) for l in lessons),
                 'documents':len(selected),'complete':sum(self.journal.get(i,{}).get('state')=='complete' for i in selected),'failed':len(failures)}
         atomic_json(self.docs/'documents-status.json',dict(report,at=time.time()))
