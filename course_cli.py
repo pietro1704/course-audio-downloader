@@ -152,6 +152,8 @@ def main(argv=None):
                           requested_concurrency=requested_concurrency)
         delivery=Delivery(root,destination,NativeCloud(args.icloud_python),adapter=build_adapter(profile,args.encoder),
                           reserve_bytes=int(args.min_free_gib*1024**3),concurrency=args.concurrency,
+                          max_concurrency=requested_concurrency,
+                          worker_limit=lambda:admitted_workers(root,requested_concurrency,int(args.min_free_gib*1024**3)),
                           upload_timeout=args.upload_timeout,event=progress.event)
         progress.current['delivered']=delivery.completed_count()
         work=[(lesson,destination/relative_audio_path(lesson)) for lesson in lessons]

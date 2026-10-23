@@ -79,6 +79,8 @@ class CourseContractsTests(unittest.TestCase):
                 delivery.return_value.journal={};delivery.return_value.completed_count.return_value=0
                 self.assertEqual(main(args),0)
                 self.assertEqual(delivery.call_args.kwargs['concurrency'],expected)
+                self.assertEqual(delivery.call_args.kwargs['max_concurrency'],8)
+                self.assertEqual(delivery.call_args.kwargs['worker_limit'](),expected)
                 self.assertEqual(documents.call_args.kwargs['concurrency'],expected)
                 status=json.loads((self.base/'work/Documentacao/delivery-status.json').read_text())
                 self.assertEqual(status['concurrency'],expected)
