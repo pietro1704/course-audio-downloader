@@ -24,6 +24,7 @@ def load_profile(path):
         pattern = value.get('extractor', {}).get('url_pattern', '')
         if 'id' not in re.compile(pattern).groupindex:
             raise ValueError('extractor-pattern-missing-identity')
+    validate_navigation(value)
     return value
 
 
@@ -76,3 +77,35 @@ def player_fields(url, profile):
     for key, pattern in player.get('field_patterns', {}).items():
         if not re.fullmatch(pattern, fields.get(key, '')): raise RuntimeError('invalid-player-field')
     return fields
+
+
+def validate_navigation(profile):
+    if profile.get('navigation_mode','reload') not in {'reload','matching-link'}:
+        raise ValueError('unsupported-navigation-mode')
+    if profile.get('navigation_mode')=='matching-link' and profile.get('mode')!='embedded-json':
+        raise ValueError('navigation-requires-guarded-embedded-adapter')
+    keys=profile.get('navigation_ignored_query_keys',[])
+    if not isinstance(keys,list) or any(not isinstance(k,str) or not k for k in keys):
+        raise ValueError('invalid-navigation-query-keys')
+
+
+def navigation_script(url,profile,context=None):
+    """Click only the exact declared lesson URL, otherwise request normal reload."""
+    validate_navigation(profile)
+    settings=json.dumps(dict(url=url,ignored=profile.get('navigation_ignored_query_keys',[]),previous=context),ensure_ascii=False)
+    return r"""(()=>{const p=SETTINGS;const target=new URL(p.url);
+const key=(value,withoutHash=false)=>{try{const u=new URL(value,location.href);
+ for(const k of p.ignored)u.searchParams.delete(k);
+ if(withoutHash)u.hash='';return u.href;}catch{return null}};
+// Revisiting a lesson must refresh expiring player/download credentials.
+if(key(location.href,true)===key(target.href,true))return 'reload-required';
+if(!p.previous||location.pathname.replace(/\/+$/,'')!==p.previous.page_path)return 'reload-required';
+const frame=document.querySelector('iframe[src]');
+try{const u=new URL(frame?.src||'',location.href);
+ if(!frame||u.origin+u.pathname!==p.previous.player)return 'reload-required';
+}catch{return 'reload-required'}
+const a=[...document.querySelectorAll('a[href]')].find(a=>
+ key(a.href)===key(target.href)&&!a.hasAttribute('download')&&!a.hasAttribute('disabled')&&
+ (a.getAttribute('aria-disabled')||'').toLowerCase()!=='true'&&
+ (!a.target||a.target.toLowerCase()==='_self'));
+if(!a)return 'reload-required';a.click();return 'link-clicked';})()""".replace('SETTINGS',settings)
