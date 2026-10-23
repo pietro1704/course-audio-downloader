@@ -154,3 +154,44 @@ SHA-256 esperado. A permissão precisa ser recíproca, com nomes e hashes iguais
 Cada link continua sendo baixado e validado; a publicação do caminho é
 serializada, preservando as duas identidades e um único arquivo original no
 iCloud. Conteúdo divergente falha sem substituir o arquivo confirmado.
+
+### Protected pauses (optional)
+
+Install `uv sync --python 3.12 --extra silence` and pass `--protected-pauses` to
+`course-deliver` (also supported by `--dry-run`). The option applies to new
+lessons only; completed/uploaded receipts keep their existing audio. Pending
+outputs with another profile/runtime identity are refused rather than edited
+again. Omit the option to retain the existing conversion behavior. Do not
+combine it with document-only or artwork-recovery modes.
+
+`protected-v1` analyzes mono 16 kHz PCM with the bundled, hash-verified MIT
+Silero ONNX model and WebRTC VAD mode 3. Silero uses 512-sample frames,
+64-sample context, per-lesson recurrent state and 0.35/0.20 hysteresis without
+minimum speech duration. Any overlap with either detector protects a 10 ms
+cell, expanded by 50 ms on each side. A separate peak guard inspects every
+original-rate sample/channel: only cells with absolute int16 amplitude <=103
+are eligible. Eligible regions >=160 ms retain 30 ms at each edge. The first
+and last second of each lesson are preserved; 5 ms junction fades affect only
+samples below that peak ceiling. There is no speed, pitch or global gain
+change. Low-volume speech can still escape both detectors: this is not a
+semantic losslessness guarantee, and educational pauses may be shortened.
+
+Original-rate PCM is memory-mapped in private staging, with chunked rendering
+and a 2 GiB decoded PCM ceiling. Disk reservations cover decoded PCM, analysis,
+rendering and remux headroom per worker; insufficient space stops safely.
+New codec subprocesses and analysis/render loops observe cancellation. The
+existing adapter encoder drains its current bounded encode before cancellation
+is checked; cancelled work cannot promote its partial output. Sources and
+previous finals remain available on failure. Original metadata and artwork
+are remuxed after one encoding using the selected AAC preset. Final validation
+checks decode, codec parameters and duration against the edited frame count
+(with at most 100 ms for AAC/container padding).
+
+Pipeline and delivery receipts contain the full profile/runtime/model identity,
+exact input/output frame counts and an integer original-to-edited interval map.
+The analysis resampler is FFmpeg libswresample (`swr`); FFmpeg and dependency
+versions participate in resume identity. Source/final hashes remain required.
+No completed library is automatically reprocessed. The distributed model is
+pinned to Silero revision `bfdc0193023f121ea5b3cc7b176dbed570a68a59`, SHA256
+`1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
+Silero and WebRTC notices ship in `protected_pauses/assets/`.

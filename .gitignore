@@ -48,3 +48,6 @@ htmlcov/
 .DS_Store
 .vscode/
 .idea/
+
+# Public MIT VAD regression fixture only
+!tests/fixtures/public-speech.wav

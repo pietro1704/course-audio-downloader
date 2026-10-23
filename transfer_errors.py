@@ -35,7 +35,9 @@ local-final-hash-mismatch login-required media-download-failed missing-catalogue
 missing-document-download-url missing-document-filename missing-document-identity
 missing-media-assets missing-next-data missing-player-hls missing-player-vod-audio
 missing-prepared-document missing-profile-origin missing-variants no-audio-candidate
-output-validation-failed overlapping-working-and-cloud-roots oversized-manifest
+silence-profile-mismatch silence-dependency-missing silence-model-hash-mismatch
+silence-inference-failed silence-codec-failed silence-invalid-pcm silence-pcm-budget-exceeded
+silence-processing-timeout output-validation-failed overlapping-working-and-cloud-roots oversized-manifest
 player-audio-download-failed player-download-timeout player-fetch-failed player-identity-mismatch
 player-remux-failed player-response-too-large player-segment-fetch-failed player-segment-size-budget
 player-segment-timeout player-source-duration-mismatch protected-media-not-supported
