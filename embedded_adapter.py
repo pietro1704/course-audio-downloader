@@ -102,6 +102,12 @@ class EmbeddedAdapter(SafariAdapter):
     def download(self, candidate, destination):
         meta = self._meta.get(candidate.url, {})
         referer = meta.get('referer', '')
+        width=self.profile.get('hls_prefetch_fragments',0)
+        if width:
+            if type(width) is not int or not 1<=width<=4:raise ValueError('invalid-hls-prefetch-width')
+            from hls_prefetch import copy_prefetched
+            result=copy_prefetched(candidate,destination,self.max_source_bytes,referer,width)
+            if result is not None:return result
         headers = 'Referer: ' + referer + '\r\nUser-Agent: Mozilla/5.0\r\n' if referer else 'User-Agent: Mozilla/5.0\r\n'
         probe = subprocess.run(['ffprobe','-v','error','-headers',headers,'-show_entries','format=duration','-of','json',candidate.url],capture_output=True,timeout=90)
         try: duration = float(json.loads(probe.stdout)['format']['duration'])
