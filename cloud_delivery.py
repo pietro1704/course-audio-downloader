@@ -85,6 +85,12 @@ class ObservedAdapter:
 
 
 class Delivery(FilePublisher):
+    @staticmethod
+    def artwork_source_failure(error):
+        return str(error) in {'artwork-original-content-changed','delivery-identity-mismatch',
+                              'no-audio-candidate','unsupported-player-frame',
+                              'source-size-budget-exceeded','hls-source-budget-exceeded'}
+
     def __init__(self, root, destination, cloud, adapter=None, reserve_bytes=4 * 1024**3,
                  upload_timeout=900, poll_seconds=3, event=None, concurrency=1):
         self.root = Path(root).resolve()
@@ -228,7 +234,7 @@ class Delivery(FilePublisher):
                 receipt['freed_bytes'] = receipt.get('freed_bytes', 0) + size
                 self.save(receipt)
 
-    def process(self, lesson, target, index=None):
+    def process(self, lesson, target, index=None, *, reconcile_original_artwork=False):
         ident = Pipeline.identity(lesson['url'])
         with self._journal_lock:
             if ident in self._inflight:
@@ -241,8 +247,17 @@ class Delivery(FilePublisher):
             self.event('start-lesson')
             if self._stop.is_set():
                 raise RuntimeError('delivery-cancelled')
-            return self._process(lesson, target)
+            if reconcile_original_artwork:
+                self.recover_original_artwork(lesson, target)
+            result=self._process(lesson, target)
+            if reconcile_original_artwork:self.record_artwork_attempt(ident,'complete')
+            return result
         except BaseException as error:
+            if reconcile_original_artwork and isinstance(error,Exception):
+                self.record_artwork_attempt(ident,'failed',error)
+                if self.artwork_source_failure(error):
+                    self.event('failed',error_type=type(error).__name__)
+                    raise
             with self._journal_lock:
                 if self._failure is None and str(error) != 'delivery-cancelled':
                     self._failure = error
@@ -254,6 +269,73 @@ class Delivery(FilePublisher):
             with self._journal_lock:
                 self._inflight.discard(ident)
             self._context.fields = {}
+
+    def record_artwork_attempt(self, ident, state, error=None):
+        path=self.docs/'artwork-attempts.json'
+        with self._journal_lock:
+            attempts=json.loads(path.read_text()) if path.exists() else {}
+            previous=attempts.get(ident,{})
+            record=dict(source_identity=ident,state=state,at=time.time(),
+                        failures=previous.get('failures',0)+(state=='failed'))
+            if error is not None:
+                allowed={'artwork-original-content-changed','delivery-identity-mismatch','disk-reserve',
+                         'no-audio-candidate','icloud-upload-timeout','source-size-budget-exceeded',
+                         'local-final-hash-mismatch','login-required','Safari-unavailable',
+                         'Safari-navigation-failed','lesson-page-identity-timeout','unsupported-player-frame'}
+                record['reason']=str(error) if str(error) in allowed else type(error).__name__
+            attempts[ident]=record;atomic_json(path,attempts)
+
+    def recover_original_artwork(self, lesson, target):
+        """Recover pre-policy originals before upgrading a confirmed receipt.
+
+        Existing source hashes remain authoritative. Never substitute a new
+        recording, re-encode the delivered audio, or discard failed downloads.
+        The normal prepared-artwork transaction handles publication and cleanup.
+        """
+        ident=Pipeline.identity(lesson['url'])
+        with self._journal_lock:
+            receipt=dict(self.journal[ident])
+        self.check_receipt(receipt,lesson,Path(target))
+        if receipt.get('artwork') or receipt.get('artwork_update') or receipt['state']=='prepared':return
+        if receipt['state'] not in {'complete','uploaded'}:raise RuntimeError('invalid-artwork-recovery-state')
+        self.confirm(receipt)
+        original,final=Path(receipt['original']),Path(receipt['final'])
+        maximum=getattr(self.adapter.adapter,'max_source_bytes',512*1024**2)
+        budget=maximum+3*receipt['size']+16*1024**2
+        if not self.pipeline._reserve(budget):raise RuntimeError('disk-reserve')
+        try:
+            folder=final.parent/'.staging'/('recover-artwork-'+uuid.uuid4().hex)
+            folder.mkdir(parents=True)
+            if not original.exists():
+                with self.pipeline._resolve_lock:
+                    if self._stop.is_set():raise RuntimeError('delivery-cancelled')
+                    candidates=self.pipeline.rank(self.adapter.resolve(lesson))
+                if not candidates:raise RuntimeError('no-audio-candidate')
+                got=Path(self.adapter.download(candidates[0],folder/('source'+original.suffix)))
+                if got.stat().st_size>maximum:raise RuntimeError('source-size-budget-exceeded')
+                if Pipeline.sha256(got)!=receipt['source_hash']:
+                    raise RuntimeError('artwork-original-content-changed')
+                if self._stop.is_set():raise RuntimeError('delivery-cancelled')
+                original.parent.mkdir(parents=True,exist_ok=True)
+                os.link(got,original);got.unlink()
+            if Pipeline.sha256(original)!=receipt['source_hash']:
+                raise RuntimeError('artwork-original-content-changed')
+            if not final.exists():
+                staged=folder/'previous.m4a'
+                with Path(target).open('rb') as source,staged.open('xb') as output:
+                    shutil.copyfileobj(source,output);output.flush();os.fsync(output.fileno())
+                if Pipeline.sha256(staged)!=receipt['final_hash']:
+                    raise RuntimeError('local-final-hash-mismatch')
+                os.link(staged,final);staged.unlink()
+            if Pipeline.sha256(final)!=receipt['final_hash']:
+                raise RuntimeError('local-final-hash-mismatch')
+            if self._stop.is_set():raise RuntimeError('delivery-cancelled')
+            receipt['state']='prepared';receipt.pop('uploaded_mtime_ns',None)
+            receipt['original_artwork_recovered_at']=time.time()
+            self.save(receipt)
+            folder.rmdir()
+        finally:
+            with self.pipeline._state_lock:self.pipeline._reserved-=budget
 
     def _process(self, lesson, target):
         start = time.monotonic()
@@ -383,7 +465,7 @@ class Delivery(FilePublisher):
         self.save(receipt)
         shutil.rmtree(staged.parent)
 
-    def run(self, work, start_index=0):
+    def run(self, work, start_index=0, *, reconcile_original_artwork=False):
         work = list(work)
         identities = [Pipeline.identity(lesson['url']) for lesson, _ in work]
         if len(set(identities)) != len(identities):
@@ -394,6 +476,7 @@ class Delivery(FilePublisher):
             raise ValueError('duplicate output paths')
         iterator = iter(enumerate(work, start_index))
         results = []
+        artwork_failures=False
         pool = ThreadPoolExecutor(max_workers=self.concurrency)
         pending = set()
         def submit():
@@ -403,7 +486,8 @@ class Delivery(FilePublisher):
                 index, (lesson, target) = next(iterator)
             except StopIteration:
                 return False
-            pending.add(pool.submit(self.process, lesson, target, index))
+            kwargs={'reconcile_original_artwork':True} if reconcile_original_artwork else {}
+            pending.add(pool.submit(self.process, lesson, target, index, **kwargs))
             return True
         try:
             for _ in range(self.concurrency):
@@ -413,8 +497,10 @@ class Delivery(FilePublisher):
                 for future in done:
                     try:
                         results.append(future.result())
-                    except BaseException:
-                        self.cancel()
+                    except BaseException as error:
+                        if reconcile_original_artwork and isinstance(error,Exception) and self.artwork_source_failure(error):
+                            artwork_failures=True
+                        else:self.cancel()
                 if not self._stop.is_set():
                     for _ in done:
                         submit()
@@ -429,6 +515,7 @@ class Delivery(FilePublisher):
             raise self._failure
         if self._stop.is_set():
             raise RuntimeError('delivery-cancelled')
+        if artwork_failures:raise RuntimeError('artwork-reconciliation-incomplete')
         return results
 
 
