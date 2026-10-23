@@ -24,6 +24,27 @@ def media_urls(data, profile=None):
         if isinstance(a,dict) and isinstance(a.get(profile.get('url_key','url')),str) and a[profile.get('url_key','url')].startswith('https://')))
 
 
+def media_thumbnail(data, profile):
+    path = profile.get('thumbnail_path')
+    if not isinstance(path, list) or not path:
+        return None
+    value = data
+    for key in path:
+        if isinstance(value, dict) and isinstance(key, str):
+            value = value.get(key)
+        elif isinstance(value, list) and type(key) is int and 0 <= key < len(value):
+            value = value[key]
+        else:
+            return None
+    if not isinstance(value, str):
+        return None
+    try:
+        url = urlsplit(value)
+    except ValueError:
+        return None
+    return value if url.scheme == 'https' and url.hostname and not url.username else None
+
+
 class EmbeddedAdapter(SafariAdapter):
     def __init__(self, timeout=60, max_source_bytes=512*1024**2, profile=None, encoder='aac'):
         super().__init__(timeout,max_source_bytes,encoder,profile)
@@ -52,9 +73,10 @@ class EmbeddedAdapter(SafariAdapter):
             if self._last_media and self._last_media[0]!=wanted and self._last_media[1]==urlsplit(src).path:matches=False
             stable=stable+1 if matches and key==last else 0;last=key
             if stable>=2:
-                urls=[u for u in media_urls(parse_next_data(self._iframe_html(src,lesson['url']),self.profile.get('script_id','__NEXT_DATA__')),self.profile) if '.m3u8' in urlsplit(u).path.lower()]
+                payload=parse_next_data(self._iframe_html(src,lesson['url']),self.profile.get('script_id','__NEXT_DATA__'))
+                urls=[u for u in media_urls(payload,self.profile) if '.m3u8' in urlsplit(u).path.lower()]
                 if not urls:raise RuntimeError('missing-media-assets')
-                candidate=Candidate(urls[0],'hls-audio',referer=src);self._meta[candidate.url]={'referer':src};self._last_media=(wanted,urlsplit(src).path)
+                candidate=Candidate(urls[0],'hls-audio',referer=src,thumbnail_url=media_thumbnail(payload,self.profile));self._meta[candidate.url]={'referer':src};self._last_media=(wanted,urlsplit(src).path)
                 return [candidate]
             time.sleep(.5)
         raise RuntimeError('embedded-lesson-identity-timeout')
