@@ -54,6 +54,22 @@ External embeds can use the optional `extractor` profile mode after `uv sync --e
 
 Embedded JSON profiles can opt into `navigation_mode: "matching-link"` to reuse the site's initialized application through a matching lesson link. Declare any ignorable tracking parameters in `navigation_ignored_query_keys` (default: none). Other query values, origins, new-window targets, download links and disabled controls never match. First resolution, missing links, revisits and changed predecessor/player state use the original URL-assignment reload, including credential refresh. A one-use context is granted only after successful media resolution, so failed navigation or metadata cannot authorize a subsequent click. Existing stable page/player/media identity checks remain required. Measure with the real site before enabling this option; UI timing does not guarantee whole-course throughput.
 
+`course-supervise-jobs --spec /path/to/private-jobs.json` supervises sequential
+trusted commands, including document backfills and artwork reconciliation.
+The spec supplies `state`, a shared browser `lock`, and `jobs` with unique `name`,
+argument lists `preflight`, `command`, `verify`, and a private `log`. Verification
+must audit the selected catalogue and native cloud receipts; exit zero alone
+does not complete a job. Optional `progress` entries supply a JSON journal `path`,
+dotted `field`, and accepted `values` for durable completion counts.
+`max_no_progress` (default 3) and `max_attempts` (default 100) survive restarts.
+Failed preflights and dead workers retry within those bounds; blocked jobs are
+recorded while later jobs continue. Exit 130 and signals SIGINT/SIGTERM leave a
+worker cancelled. Cancelling monitoring keeps its worker running, and another
+monitor refuses to overlap it. A changed spec fails closed; optional `bindings`
+of `path` and `sha256` also pin engine and input files. Independent lanes must
+bind separate existing tabs. Status records exit codes, progress, retry limits
+and available disk; errors remain in the private job log.
+
 ### Documentos das aulas
 
 `course-deliver` também inventaria e entrega os documentos originais de todas as
