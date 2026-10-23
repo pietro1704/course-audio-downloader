@@ -1,7 +1,7 @@
 """Course-neutral authenticated audio delivery and read-only preflight."""
 from __future__ import annotations
 import argparse
-import fcntl
+import portable_lock as fcntl
 import json
 import math
 import shutil
@@ -23,6 +23,9 @@ from transfer_errors import failure_reason
 
 def build_adapter(profile,encoder='aac_at'):
     cls={'direct':SafariAdapter,'embedded-json':EmbeddedAdapter,'template-hls':TemplateAdapter,'extractor':ExtractorAdapter}[profile['mode']]
+    if '_browser_runtime' in profile:
+        from authenticated_browser import cookie_adapter
+        return cookie_adapter(cls,profile,encoder)
     return cls(profile=profile,encoder=encoder)
 
 
@@ -84,6 +87,11 @@ def preflight(lessons,profile,root,destination,cloud):
 
 
 def main(argv=None):
+    import sys
+    values=list(sys.argv[1:] if argv is None else argv)
+    if not any(v=='--catalog' or v.startswith('--catalog=') for v in values):
+        from local_course import main as download_url
+        return download_url(values)
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--catalog',required=True);p.add_argument('--profile',required=True)
     p.add_argument('--root','--output-root',dest='root',required=True)

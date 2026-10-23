@@ -3,7 +3,15 @@ name = "course-audio-downloader"
 version = "0.1.3rc4"
 description = "Personal authenticated course audio downloader"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "browser-cookie3>=0.20,<1",
+    "numpy>=2,<3",
+    "onnxruntime==1.23.2",
+    "playwright>=1.55,<2",
+    "portalocker>=3,<4",
+    "publicsuffix2>=2.20191221",
+    "webrtcvad-wheels==2.0.14.post1",
+]
 [project.optional-dependencies]
 silence = ["numpy>=2,<3", "onnxruntime==1.23.2", "webrtcvad-wheels==2.0.14.post1"]
 extractor = ["yt-dlp>=2026.8.19"]
@@ -11,18 +19,22 @@ extractor = ["yt-dlp>=2026.8.19"]
 [project.scripts]
 course-audio-bot = "course_audio_bot:main"
 course-deliver = "course_cli:main"
+course-site = "local_portal:main"
 course-supervise = "queue_supervisor:main"
 course-supervise-jobs = "job_supervisor:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "transfer_errors", "file_delivery", "documents", "document_browser", "bounded_actions"]
+py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "transfer_errors", "file_delivery", "documents", "document_browser", "bounded_actions", "course_discovery", "local_course", "authenticated_browser", "portable_lock", "local_paths"]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["protected_pauses"]
+include = ["protected_pauses", "provider_profiles", "local_portal"]
 [tool.setuptools.package-data]
 protected_pauses = ["assets/*"]
+
+provider_profiles = ["*.json"]
+local_portal = ["assets/*"]

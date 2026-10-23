@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install authenticated renderer
+        run: uv run playwright install --with-deps chromium
       - name: Tests
         run: uv run python -m unittest -v
       - name: Repository hygiene check
@@ -45,3 +47,39 @@ jobs:
           if result.returncode != 1:
               raise SystemExit('Secret scan matched or failed')
           PYTHON
+
+  portable-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install Python dependencies
+        run: uv sync --python 3.12 --locked
+      - name: Install authenticated renderer
+        run: uv run playwright install --with-deps chromium
+      - name: URL CLI, browser session and local website regressions
+        run: uv run python -m unittest -v test_authenticated_browser test_course_discovery test_local_course test_local_portal test_local_portal_ui test_url_cli
+
+  web-browsers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: uv sync --python 3.12 --locked
+      - run: uv run playwright install --with-deps chromium firefox webkit
+      - name: Website in Chromium, Firefox and WebKit
+        env:
+          COURSE_TEST_WEB_ENGINES: chromium,firefox,webkit
+        run: uv run python -m unittest -v test_local_portal_ui

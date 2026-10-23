@@ -4,6 +4,13 @@ import subprocess
 
 KNOWN_FAILURES=frozenset("""
 invalid-shared-document-permission
+invalid-course-url unsupported-course-url unsupported-course-provider
+course-page-identity-mismatch course-discovery-timeout no-course-lessons-found
+missing-course-title missing-lesson-title foreign-course-lesson duplicate-course-path
+open-provider-in-safari local-artifact-identity-mismatch
+invalid-download-selection invalid-download-request load-a-course-first
+request-identity-mismatch a-download-is-active invalid-or-conflicting-request
+engine-initialization-failed authenticated-browser-failed authenticated-browser-closed authenticated-browser-timeout
 Safari-lesson-identity-timeout Safari-navigation-failed Safari-unavailable
 ambiguous-document-identity-or-path ambiguous-external-media another-document-run-is-active
 artwork-original-content-changed artwork-processing-failed artwork-reconciliation-incomplete

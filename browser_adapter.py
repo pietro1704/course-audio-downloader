@@ -176,7 +176,7 @@ end tell'''
             return copy_hls_audio(candidate,destination,self.max_source_bytes,self._hls_meta.get(candidate.url, candidate.referer or ""))
         req = urllib.request.Request(candidate.url, headers={'User-Agent': 'Mozilla/5.0'})
         try:
-            with urllib.request.urlopen(req, timeout=90) as response, destination.open('wb') as output:
+            with getattr(self,'urlopen',urllib.request.urlopen)(req, timeout=90) as response, destination.open('wb') as output:
                 if response.headers.get_content_type() in {'text/html', 'application/json'}:
                     raise RuntimeError('unexpected-media-content-type')
                 length = int(response.headers.get('Content-Length') or 0)

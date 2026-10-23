@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import shutil
@@ -27,16 +26,17 @@ def atomic_json(path, value):
     path = Path(path)
     temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
-        with temporary.open('x') as output:
+        with temporary.open('x',encoding='utf-8') as output:
             json.dump(value, output, ensure_ascii=False, indent=2)
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
-        descriptor = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        if os.name!='nt':
+            descriptor = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     finally:
         temporary.unlink(missing_ok=True)
 
