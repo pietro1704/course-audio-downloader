@@ -135,6 +135,54 @@ thumbnail on the existing audio without downloading or re-encoding a replacement
 No available thumbnail leaves a recorded no-cover result. Default reconciliation
 continues to reject changed source bytes.
 
+## Local transcription
+
+`course-transcribe` turns a downloaded course folder into one Markdown file per
+audio lesson, for search and as reference material for AI tools:
+
+```sh
+uv run course-transcribe ~/Downloads/'Course Audio'/'My Course' --course 'My Course (Author)'
+```
+
+Audio never leaves the machine. Lessons are split near detected pauses (about
+4-minute chunks), transcribed with NVIDIA Parakeet TDT 0.6B v3 through the
+whisper.cpp `parakeet-cli` example, and regrouped into paragraphs prefixed with
+`[hh:mm:ss]`. Each file has YAML front matter (title, course, source audio,
+duration, same-named PDF if present, engine, date); `README.md` indexes the
+lessons. Output defaults to `<course>/Transcrições` (`--output` changes it).
+Folders starting with `.` or `_` are skipped. Completed chunks are kept under
+`.transcription-work`, so an interrupted run resumes; finished lessons are
+skipped unless `--force`. `--select GLOB` (repeatable) limits the run to
+matching audio filenames, e.g. to split a course between two machines.
+Transcripts are automatic and unreviewed.
+
+The engine is not bundled. Build `parakeet-cli` from whisper.cpp
+(`cmake -B build -DBUILD_SHARED_LIBS=OFF && cmake --build build --target parakeet-cli`)
+and download `ggml-parakeet-tdt-0.6b-v3-q8_0.bin` from
+`ggml-org/parakeet-GGUF` on Hugging Face. Defaults are
+`~/.local/share/course-audio-downloader/{bin/parakeet-cli,models/…}`; override
+with `--engine`/`--model` or `COURSE_PARAKEET_CLI`/`COURSE_PARAKEET_MODEL`.
+On a 4-core Intel laptop CPU it runs at about 5× real time when unthrottled.
+
+Transcription is a background job and yields to interactive work. `--policy`
+(`auto` picks by OS) selects host limits from `resource_policy.py`:
+
+- `mac`: runs only while the `/tmp/epub2mp3.heavy-job.lock` flock lease is free
+  (probed, never held), no `xcodebuild`/Simulator/`launchd_sim`/simulator dyld
+  cache build is running, swap is under 3 GiB and memory pressure is normal.
+  The engine runs under `taskpolicy -b` with at most 2 threads.
+- `linux`: the engine runs in `systemd-run --user --scope` with `MemoryMax=2G`,
+  `MemorySwapMax=0` and `CPUQuota=200%`, under `nice -n 19` and `ionice -c3`,
+  with at most 2 threads. It waits while Flutter/Dart/Gradle/Kotlin/emulator
+  processes are actively using CPU or `MemAvailable` is under 1.5 GiB.
+- `none`: no limits.
+
+When a condition appears mid-chunk, the engine's process group is paused with
+SIGSTOP and resumed with SIGCONT; paused time does not count toward the
+timeout. If the memory limit kills the engine, the chunk is split in half and
+retried (down to 30 s). `--chunk-seconds` (default 120, about 1.2 GB peak)
+only shapes new lessons; an interrupted lesson keeps its existing cuts.
+
 Run the same regression gate as CI (Node 22+ is needed for generated browser-JavaScript contract tests):
 
 ```sh

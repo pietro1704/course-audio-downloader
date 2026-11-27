@@ -22,10 +22,11 @@ course-deliver = "course_cli:main"
 course-site = "local_portal:main"
 course-supervise = "queue_supervisor:main"
 course-supervise-jobs = "job_supervisor:main"
+course-transcribe = "transcription:main"
 [tool.uv]
 package = true
 [tool.setuptools]
-py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "transfer_errors", "file_delivery", "documents", "document_browser", "bounded_actions", "course_discovery", "local_course", "authenticated_browser", "portable_lock", "local_paths", "automatic_site"]
+py-modules = ["course_cli", "course_catalog", "site_profile", "course_audio_bot", "pipeline", "browser_adapter", "embedded_adapter", "media_transport", "cloud_delivery", "icloud_bridge", "artwork", "template_adapter", "extractor_adapter", "queue_supervisor", "job_supervisor", "transfer_errors", "file_delivery", "documents", "document_browser", "bounded_actions", "course_discovery", "local_course", "authenticated_browser", "portable_lock", "local_paths", "automatic_site", "transcription", "resource_policy"]
 
 [build-system]
 requires = ["setuptools>=68"]
